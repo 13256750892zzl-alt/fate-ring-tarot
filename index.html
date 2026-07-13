@@ -1,0 +1,780 @@
+<!doctype html>
+<!-- 命运之环：复刻视频中的隔空手势塔罗静态网页 -->
+<html lang="zh-CN">
+<head>
+<!-- 声明文档字符编码为 UTF-8 -->
+<meta charset="UTF-8" />
+<!-- 适配移动端视口宽度 -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- 页面标题：与视频同款命运之环 -->
+<title>THE FATE RING · 命运之环</title>
+<!-- 预连接 Google Fonts 加速字体加载 -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<!-- 预连接字体静态资源域名 -->
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<!-- 引入与视频一致的衬线英文字体与中文宋体风格字体 -->
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cinzel+Decorative:wght@700&family=Noto+Serif+SC:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+  /* ===== 全局主题色与尺寸变量（金色神秘风） ===== */
+  :root{
+    --gold-1:#f7ecc4; /* 浅金高光 */
+    --gold-2:#e9c876; /* 主金色 */
+    --gold-3:#c79a3e; /* 深金描边 */
+    --gold-4:#8c6a24; /* 暗金阴影 */
+    --glow:rgba(233,200,118,.55); /* 金色光晕 */
+    --card-w:152px; /* 单张牌宽度 */
+    --card-h:227px; /* 单张牌高度 */
+    --radius:560px; /* 3D 圆环半径 */
+  }
+  /* 统一盒模型计算方式 */
+  *{box-sizing:border-box;}
+  /* 让页面铺满视口并去掉默认边距 */
+  html,body{height:100%;margin:0;}
+  /* 深空径向渐变背景，贴近视频里的宇宙感 */
+  body{
+    background:
+      radial-gradient(120% 90% at 50% 18%, #1b2a5e 0%, transparent 55%),
+      radial-gradient(140% 120% at 50% 40%, #16204a 0%, #0a0f27 42%, #05060f 78%, #03040a 100%);
+    background-color:#05060f; /* 兜底近黑色 */
+    color:#e8e2cf; /* 米金色正文 */
+    font-family:"Noto Serif SC","Cinzel",serif; /* 中英混排字体 */
+    overflow:hidden; /* 禁止页面滚动，专注仪式舞台 */
+    -webkit-font-smoothing:antialiased; /* 字体抗锯齿 */
+    user-select:none; /* 禁止误选中文字 */
+  }
+  /* 背景星云光斑层 */
+  .nebula{
+    position:fixed; left:50%; top:42%; width:1500px; height:1500px;
+    transform:translate(-50%,-50%); /* 居中定位 */
+    background:
+      radial-gradient(closest-side, rgba(86,108,196,.18), transparent 70%),
+      radial-gradient(closest-side at 38% 44%, rgba(150,96,200,.12), transparent 60%),
+      radial-gradient(closest-side at 64% 56%, rgba(64,150,180,.10), transparent 60%);
+    filter:blur(6px); z-index:0; pointer-events:none; /* 不拦截鼠标 */
+  }
+  /* 星空粒子画布铺满全屏 */
+  #starfield{position:fixed; inset:0; z-index:0; pointer-events:none;}
+  /* 金色曼陀罗轨道（视频中的交轨圆环） */
+  .mandala{
+    position:fixed; left:50%; top:48%; width:760px; height:760px;
+    transform:translate(-50%,-50%); z-index:1; pointer-events:none;
+    opacity:.5; mix-blend-mode:screen; animation:spin 90s linear infinite;
+  }
+  /* 反向旋转的内层轨道，增加层次 */
+  .mandala.rev{animation:spin 130s linear infinite reverse; opacity:.32; width:520px; height:520px;}
+  /* 轨道缓慢自转关键帧 */
+  @keyframes spin{to{transform:translate(-50%,-50%) rotate(360deg);}}
+  /* 中心金色呼吸光 */
+  .core-glow{
+    position:fixed; left:50%; top:48%; width:340px; height:340px;
+    transform:translate(-50%,-50%);
+    background:radial-gradient(closest-side, rgba(233,200,118,.30), rgba(233,200,118,.06) 45%, transparent 72%);
+    z-index:1; pointer-events:none; animation:breathe 6s ease-in-out infinite;
+  }
+  /* 光晕呼吸动画 */
+  @keyframes breathe{
+    0%,100%{opacity:.7; transform:translate(-50%,-50%) scale(1);}
+    50%{opacity:1; transform:translate(-50%,-50%) scale(1.08);}
+  }
+  /* 边缘暗角，聚焦中央牌环 */
+  .vignette{
+    position:fixed; inset:0; z-index:5; pointer-events:none;
+    background:radial-gradient(120% 100% at 50% 42%, transparent 55%, rgba(2,3,9,.55) 86%, rgba(2,3,9,.92) 100%);
+  }
+  /* 顶部品牌标题栏 */
+  .topbar{position:fixed; top:0; left:0; right:0; z-index:20; text-align:center; padding:46px 16px 0;}
+  /* 大标题：金色渐变镂空字 */
+  .title{
+    font-family:"Cinzel Decorative","Cinzel",serif; font-weight:700;
+    font-size:clamp(24px,4vw,46px); letter-spacing:.4em; margin:0 0 0 .4em;
+    background:linear-gradient(180deg,#fff6da 0%,var(--gold-2) 42%,var(--gold-3) 78%,#9c7426 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow:0 0 28px rgba(233,200,118,.28); filter:drop-shadow(0 1px 0 rgba(0,0,0,.5));
+  }
+  /* 标题下方装饰线与菱形点 */
+  .title-deco{display:flex; align-items:center; justify-content:center; gap:18px; margin-top:10px;}
+  .title-deco .line{height:1px; width:min(150px,22vw); background:linear-gradient(90deg,transparent,var(--gold-3),transparent);}
+  .title-deco .dot{width:5px;height:5px;transform:rotate(45deg);background:var(--gold-2); box-shadow:0 0 10px var(--glow);}
+  /* 副标题文案 */
+  .subtitle{margin-top:14px; font-weight:300; letter-spacing:.5em; font-size:clamp(12px,1.5vw,16px); color:#cdbd8e; opacity:.9; padding-left:.5em;}
+  /* 3D 舞台透视容器 */
+  .stage{
+    position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
+    padding-top:150px; perspective:1300px; perspective-origin:50% 50%;
+  }
+  /* 命运之环本体：CSS 3D 旋转 */
+  .ring{
+    position:relative; width:var(--card-w); height:var(--card-h); transform-style:preserve-3d;
+    transform:translateY(-6px) rotateX(9deg) rotateY(var(--rot,0deg)); will-change:transform;
+  }
+  /* 环上的单张卡牌 */
+  .card{
+    position:absolute; inset:0; width:var(--card-w); height:var(--card-h); transform-style:preserve-3d;
+    backface-visibility:hidden; cursor:pointer; transition:filter .3s ease;
+  }
+  /* 牌面容器 */
+  .card .face{
+    position:absolute; inset:0; border-radius:12px; overflow:hidden; background:#0a0813;
+    box-shadow:0 10px 34px rgba(0,0,0,.6), inset 0 0 0 3px #0a0813;
+  }
+  /* 牌背 SVG 铺满 */
+  .card svg{display:block; width:100%; height:100%;}
+  /* 牌面图片铺满裁切 */
+  .card .face img,.fb img{width:100%; height:100%; object-fit:cover; display:block; image-rendering:auto;}
+  /* 正中选中牌高亮 */
+  .card.active{filter:drop-shadow(0 0 22px rgba(233,200,118,.9)) brightness(1.14);}
+  /* 已抽取的牌变暗 */
+  .card.used{opacity:.18 !important; filter:grayscale(.6) brightness(.4); cursor:default;}
+  /* 环底黄色光点轨道（视频同款） */
+  .orbit-dots{
+    position:absolute; left:50%; top:50%; width:0; height:0; transform-style:preserve-3d;
+    pointer-events:none; z-index:0;
+  }
+  .orbit-dot{
+    position:absolute; width:8px; height:8px; margin:-4px; border-radius:50%;
+    background:radial-gradient(circle at 30% 30%, #fff6da, var(--gold-2) 45%, transparent 70%);
+    box-shadow:0 0 12px rgba(233,200,118,.95); opacity:.85;
+  }
+  /* 飞牌翻面动画层 */
+  .flyer{position:fixed; z-index:46; pointer-events:none; perspective:1000px;}
+  .flip{position:absolute; inset:0; transform-style:preserve-3d;}
+  .fb,.ff{
+    position:absolute; inset:0; border-radius:11px; overflow:hidden; backface-visibility:hidden; background:#0a0813;
+    box-shadow:0 18px 50px rgba(0,0,0,.7), 0 0 40px rgba(233,200,118,.55);
+  }
+  /* 正面相对背面翻转 180 度 */
+  .ff{transform:rotateY(180deg); background:#0a0a16; box-shadow:0 18px 50px rgba(0,0,0,.7), 0 0 46px rgba(233,200,118,.75), inset 0 0 0 3px var(--gold-3);}
+  .ff img,.drawn img,.rcard img{width:100%; height:100%; object-fit:cover; display:block;}
+  /* 底部过去/现在/未来卡槽 */
+  .tray{position:fixed; left:0; right:0; bottom:30px; z-index:18; display:flex; gap:26px; justify-content:center; align-items:flex-end;}
+  .slot{
+    width:86px; height:135px; border-radius:9px; border:1px dashed rgba(233,200,118,.35);
+    background:linear-gradient(180deg, rgba(233,200,118,.05), rgba(233,200,118,.01));
+    display:flex; align-items:center; justify-content:center; position:relative; box-shadow:inset 0 0 22px rgba(0,0,0,.4);
+  }
+  .slot .ph{font-family:"Cinzel",serif; font-size:26px; color:rgba(233,200,118,.4); font-weight:600;}
+  .slot .drawn{
+    position:absolute; inset:0; border-radius:9px; overflow:hidden; opacity:0; transform:scale(.9);
+    transition:opacity .5s ease, transform .5s cubic-bezier(.2,.7,.2,1);
+    box-shadow:0 6px 22px rgba(0,0,0,.6), 0 0 18px rgba(233,200,118,.4), inset 0 0 0 2px var(--gold-3);
+  }
+  .slot.filled .drawn{opacity:1; transform:scale(1);}
+  .slot.filled{border-color:transparent;}
+  .slot .name{position:absolute; left:0; right:0; bottom:-22px; text-align:center; font-family:"Cinzel",serif; font-size:11px; letter-spacing:.12em; color:var(--gold-2); opacity:0; transition:opacity .4s ease .35s;}
+  .slot.filled .name{opacity:.95;}
+  .slot .pos{position:absolute; left:0; right:0; top:-20px; text-align:center; font-size:10px; letter-spacing:.3em; color:#9a906f;}
+  /* 粒子特效画布 */
+  #fx{position:fixed; inset:0; z-index:45; pointer-events:none;}
+  /* 左下角摄像头 HUD */
+  .hud{position:fixed; left:22px; bottom:24px; z-index:25; display:flex; flex-direction:column; gap:10px;}
+  .cam-wrap{
+    position:relative; width:172px; height:129px; border-radius:10px; overflow:hidden;
+    border:1px solid rgba(233,200,118,.3); background:#05070f; display:none; box-shadow:0 8px 24px rgba(0,0,0,.5);
+  }
+  .cam-wrap.on{display:block;}
+  #cam{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); opacity:.85;}
+  #overlay{position:absolute; inset:0; width:100%; height:100%; transform:scaleX(-1);}
+  .cam-tag{position:absolute; left:7px; top:6px; font-family:"Cinzel",serif; font-size:9px; letter-spacing:.18em; color:var(--gold-2); text-shadow:0 1px 3px #000;}
+  .controls{display:flex; flex-wrap:wrap; gap:8px;}
+  /* 金色按钮 */
+  .btn{
+    font-family:"Cinzel",serif; font-size:12.5px; letter-spacing:.06em; color:#1a1206; white-space:nowrap;
+    background:linear-gradient(180deg,var(--gold-1),var(--gold-2) 55%,var(--gold-3)); border:none; border-radius:30px;
+    padding:9px 15px; cursor:pointer; font-weight:600;
+    box-shadow:0 4px 14px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.5);
+    transition:transform .15s ease, box-shadow .2s ease;
+  }
+  .btn:hover{transform:translateY(-1px); box-shadow:0 6px 18px rgba(233,200,118,.4);}
+  .btn.ghost{background:transparent; color:var(--gold-2); border:1px solid rgba(233,200,118,.45); box-shadow:none; font-weight:500;}
+  /* 中央状态提示 */
+  .status{
+    position:fixed; left:0; right:0; bottom:184px; z-index:22; text-align:center; font-weight:300;
+    font-size:14px; letter-spacing:.34em; color:#cdbd8e; opacity:.85; pointer-events:none; padding-left:.4em; transition:opacity .3s;
+  }
+  /* 右下角操作提示 */
+  .hint{position:fixed; right:22px; bottom:24px; z-index:22; text-align:right; font-weight:300; font-size:12px; line-height:2; color:#9a906f; opacity:.8;}
+  .hint b{color:var(--gold-2); font-weight:400;}
+  /* 视频同款：翻牌后底部半透明信息浮层 */
+  .card-info{
+    position:fixed; left:50%; bottom:210px; transform:translateX(-50%) translateY(12px);
+    z-index:40; min-width:280px; max-width:min(420px,88vw); padding:16px 20px;
+    background:rgba(6,8,18,.82); border:1px solid rgba(233,200,118,.35);
+    border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,.55), 0 0 28px rgba(233,200,118,.18);
+    opacity:0; pointer-events:none; transition:opacity .45s ease, transform .45s ease; backdrop-filter:blur(8px);
+  }
+  .card-info.on{opacity:1; transform:translateX(-50%) translateY(0); pointer-events:auto;}
+  .card-info .num{font-family:"Cinzel",serif; color:var(--gold-2); font-size:20px; letter-spacing:.2em; margin:0 0 6px;}
+  .card-info .kw{font-size:12px; letter-spacing:.28em; color:#9a906f; margin-bottom:8px;}
+  .card-info .kw span{color:var(--gold-1);}
+  .card-info .desc{font-weight:300; font-size:14px; line-height:1.9; letter-spacing:.06em; color:#d6cba6; margin:0;}
+  /* 终局解读遮罩 */
+  .finale{
+    position:fixed; inset:0; z-index:60; display:none; align-items:center; justify-content:center; padding:30px;
+    background:radial-gradient(closest-side, rgba(5,6,15,.5), rgba(3,4,10,.92)); backdrop-filter:blur(4px);
+  }
+  .finale.on{display:flex; animation:fade .8s ease;}
+  @keyframes fade{from{opacity:0;}to{opacity:1;}}
+  .reading{max-width:780px; width:100%; max-height:90vh; overflow:auto; text-align:center;}
+  .reading h2{
+    font-family:"Cinzel Decorative",serif; color:transparent; letter-spacing:.28em; font-size:clamp(24px,3.2vw,34px); margin:0 0 6px;
+    background:linear-gradient(180deg,#fff6da,var(--gold-2),var(--gold-3)); -webkit-background-clip:text; background-clip:text;
+    text-shadow:0 0 30px rgba(233,200,118,.3);
+  }
+  .reading .sub{font-weight:300; letter-spacing:.34em; color:#bcae84; font-size:13px; margin-bottom:16px;}
+  .reading-cards{display:flex; gap:18px; justify-content:center; flex-wrap:wrap; margin-bottom:16px;}
+  .rcard{width:104px;}
+  .rcard .img{
+    width:104px; height:166px; border-radius:9px; overflow:hidden;
+    box-shadow:0 10px 30px rgba(0,0,0,.6), 0 0 22px rgba(233,200,118,.35), inset 0 0 0 2px var(--gold-3);
+    animation:rise .9s cubic-bezier(.2,.7,.2,1) both;
+  }
+  .rcard:nth-child(2) .img{animation-delay:.15s;}
+  .rcard:nth-child(3) .img{animation-delay:.3s;}
+  @keyframes rise{from{opacity:0; transform:translateY(24px) scale(.92);}to{opacity:1; transform:none;}}
+  .rcard .pos{font-size:11px; letter-spacing:.3em; color:#9a906f; margin-top:12px;}
+  .rcard .cn{font-family:"Cinzel",serif; color:var(--gold-2); font-size:16px; margin-top:4px; letter-spacing:.1em;}
+  .reading-text{font-weight:300; line-height:2.1; letter-spacing:.06em; color:#d6cba6; font-size:15px; max-width:680px; margin:0 auto 24px; text-align:left;}
+  .reading-text .li{margin-bottom:14px;}
+  .reading-text .li b{color:var(--gold-2); font-weight:500;}
+  .reading-text .adv{color:#b6a877; font-size:13.5px;}
+  .reading-text .sum{margin-top:18px; padding-top:16px; border-top:1px solid rgba(233,200,118,.25); color:#cdbd8e; text-align:center; line-height:2.2;}
+  /* 小屏自适应缩小牌环 */
+  @media (max-width:680px){
+    :root{--card-w:120px; --card-h:179px; --radius:360px;}
+    .tray{gap:14px;} .slot{width:70px;height:110px;} .hint{display:none;}
+    .rcard{width:96px;} .rcard .img{width:96px;height:155px;}
+    .card-info{bottom:190px;}
+  }
+</style>
+</head>
+<body>
+  <!-- 星空粒子画布 -->
+  <canvas id="starfield"></canvas>
+  <!-- 星云氛围层 -->
+  <div class="nebula"></div>
+  <!-- 外层金色轨道曼陀罗 -->
+  <svg class="mandala" id="mandalaA" viewBox="0 0 400 400" aria-hidden="true"></svg>
+  <!-- 内层反向轨道曼陀罗 -->
+  <svg class="mandala rev" id="mandalaB" viewBox="0 0 400 400" aria-hidden="true"></svg>
+  <!-- 中心呼吸光 -->
+  <div class="core-glow"></div>
+
+  <!-- 顶部品牌标题 -->
+  <div class="topbar">
+    <h1 class="title">THE&nbsp;FATE&nbsp;RING</h1>
+    <div class="title-deco"><span class="line"></span><span class="dot"></span><span class="line"></span></div>
+    <div class="subtitle">选择三张属于你的指引塔罗之牌</div>
+  </div>
+
+  <!-- 3D 命运之环舞台 -->
+  <div class="stage"><div class="ring" id="ring"></div></div>
+  <!-- 粒子特效层 -->
+  <canvas id="fx"></canvas>
+  <!-- 暗角遮罩 -->
+  <div class="vignette"></div>
+
+  <!-- 视频同款：单张牌信息浮层 -->
+  <div class="card-info" id="cardInfo" aria-live="polite">
+    <div class="num" id="infoNum">XII 倒吊人</div>
+    <div class="kw">关键词 · <span id="infoKey">臣服 · 转念</span></div>
+    <p class="desc" id="infoDesc">暂停与臣服，换一个视角看世界，牺牲换来顿悟。</p>
+  </div>
+
+  <!-- 状态提示文案 -->
+  <div class="status" id="status">拖动旋转命运之环 · 点击正中之牌抽取</div>
+
+  <!-- 过去 / 现在 / 未来 三槽 -->
+  <div class="tray" id="tray">
+    <div class="slot"><span class="pos">过去</span><span class="ph">I</span><div class="drawn"></div><div class="name"></div></div>
+    <div class="slot"><span class="pos">现在</span><span class="ph">II</span><div class="drawn"></div><div class="name"></div></div>
+    <div class="slot"><span class="pos">未来</span><span class="ph">III</span><div class="drawn"></div><div class="name"></div></div>
+  </div>
+
+  <!-- 手势摄像头与按钮 -->
+  <div class="hud">
+    <div class="cam-wrap" id="camWrap">
+      <video id="cam" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <span class="cam-tag">GESTURE · 手势</span>
+    </div>
+    <div class="controls">
+      <button class="btn" id="camBtn">开启手势</button>
+      <button class="btn ghost" id="resetBtn">重新洗牌</button>
+    </div>
+  </div>
+
+  <!-- 操作说明 -->
+  <div class="hint">
+    <b>鼠标</b> 拖动旋转 · 点击抽牌<br/>
+    <b>键盘</b> ← → 旋转 · 空格抽牌<br/>
+    <b>手势</b> 移动手掌旋转 · 捏合抽牌
+  </div>
+
+  <!-- 三张牌终局解读面板 -->
+  <div class="finale" id="finale"><div class="reading" id="reading"></div></div>
+
+<script>
+/* ============================================================ */
+/* THE FATE RING — 隔空手势塔罗（复刻视频交互与视觉）         */
+/* 牌背 → 翻牌 → 真实牌面图(assets/cards/0..21.jpg) + 信息浮层 */
+/* ============================================================ */
+
+/* 大阿尔卡纳 22 张牌的基础数据：编号、中英文名、关键词、牌意 */
+const ARCANA = [
+  {n:'0',    en:'THE FOOL',         cn:'愚者',    key:'起点 · 无限可能', m:'全新的开始，带着纯真与勇气，信任地纵身一跃。'},
+  {n:'I',    en:'THE MAGICIAN',     cn:'魔术师',  key:'意志 · 创造',     m:'你已握有实现愿望的全部资源，专注意志即可点石成金。'},
+  {n:'II',   en:'HIGH PRIESTESS',   cn:'女祭司',  key:'直觉 · 神秘',     m:'倾听直觉与潜意识，答案藏在静默、梦境与未言说之处。'},
+  {n:'III',  en:'THE EMPRESS',      cn:'女皇',    key:'丰盛 · 滋养',     m:'丰盛与创造力正在孕育，温柔善待自己与所爱之人。'},
+  {n:'IV',   en:'THE EMPEROR',      cn:'皇帝',    key:'秩序 · 权威',     m:'建立秩序与边界，以稳定和担当稳稳掌握局面。'},
+  {n:'V',    en:'THE HIEROPHANT',   cn:'教皇',    key:'传统 · 指引',     m:'寻求导师、传统或信念的指引，遵循内在的准则。'},
+  {n:'VI',   en:'THE LOVERS',       cn:'恋人',    key:'结合 · 抉择',     m:'关于爱与价值的重要抉择，忠于内心真正的契合。'},
+  {n:'VII',  en:'THE CHARIOT',      cn:'战车',    key:'掌控 · 前行',     m:'以坚定意志驾驭对立的力量，胜利属于自律者。'},
+  {n:'VIII', en:'STRENGTH',         cn:'力量',    key:'勇气 · 柔韧',     m:'真正的力量是温柔的勇气，以爱驯服内在的野性。'},
+  {n:'IX',   en:'THE HERMIT',       cn:'隐者',    key:'内省 · 寻光',     m:'退一步向内探寻，孤独中自有照亮前路的那盏灯。'},
+  {n:'X',    en:'WHEEL OF FORTUNE', cn:'命运之轮',key:'轮转 · 时机',     m:'时来运转，顺应变化的浪潮，把握转折的契机。'},
+  {n:'XI',   en:'JUSTICE',          cn:'正义',    key:'平衡 · 因果',     m:'因果分明、权衡公正，为自己的每个选择负起责任。'},
+  {n:'XII',  en:'THE HANGED MAN',   cn:'倒吊人',  key:'臣服 · 转念',     m:'暂停与臣服，换一个视角看世界，牺牲换来顿悟。'},
+  {n:'XIII', en:'DEATH',            cn:'死神',    key:'终结 · 重生',     m:'一段旅程的终结，唯有放手，才能迎来真正的重生。'},
+  {n:'XIV',  en:'TEMPERANCE',       cn:'节制',    key:'调和 · 流动',     m:'调和与中道，耐心融合对立，让一切流动而平衡。'},
+  {n:'XV',   en:'THE DEVIL',        cn:'恶魔',    key:'欲望 · 束缚',     m:'看清束缚你的欲望与执念，枷锁其实握在自己手中。'},
+  {n:'XVI',  en:'THE TOWER',        cn:'高塔',    key:'崩塌 · 觉醒',     m:'旧结构的崩塌虽然震撼，却为真实清出了地基。'},
+  {n:'XVII', en:'THE STAR',         cn:'星星',    key:'希望 · 疗愈',     m:'风暴之后的希望与疗愈，星光指引你重拾信念。'},
+  {n:'XVIII',en:'THE MOON',         cn:'月亮',    key:'幻象 · 潜意识',   m:'迷雾与幻象之中，直面恐惧，倾听潜意识的低语。'},
+  {n:'XIX',  en:'THE SUN',          cn:'太阳',    key:'喜悦 · 成功',     m:'喜悦、丰盈与成功，万物在阳光下显露真实的光彩。'},
+  {n:'XX',   en:'JUDGEMENT',        cn:'审判',    key:'召唤 · 重生',     m:'觉醒与召唤，回应内心深处的呼声，重估并新生。'},
+  {n:'XXI',  en:'THE WORLD',        cn:'世界',    key:'圆满 · 完成',     m:'圆满与完成，一个周期的达成，你已抵达，又将启程。'},
+];
+
+/* 每张牌更详细的行动指引文案 */
+const ADV=[
+  '放下顾虑，勇敢迈出第一步，未知里往往藏着礼物。',
+  '明确你的意图，把想法付诸行动，你远比自己以为的更有力量。',
+  '别急着行动，先静下来，聆听内心真正的声音。',
+  '允许自己被滋养，也去滋养他人，丰盛会自然流向你。',
+  '为生活立下清晰的规则与目标，稳扎稳打地推进。',
+  '不妨向有经验的人请教，或回到你真正信任的价值里。',
+  '遵从真心去选择，而不是出于恐惧或他人的期待。',
+  '收束心神、锁定方向，凭决心冲过眼前的阻碍。',
+  '用耐心与温柔，而非蛮力，去面对难题和情绪。',
+  '给自己一段独处的时间，向内寻找你要的答案。',
+  '顺势而为，机会来临时别犹豫，及时抓住它。',
+  '诚实地面对因果，做出公正且自己能负责的决定。',
+  '试着放手与等待，换个角度，僵局会自行松动。',
+  '主动告别已不再适合你的人与事，为新生腾出空间。',
+  '保持节奏与平衡，凡事不走极端，耐心地调和。',
+  '觉察自己的执念与依赖，你随时可以选择挣脱。',
+  '接受意外带来的瓦解，它在替你清走虚假的根基。',
+  '重拾希望，温柔地疗愈自己，光明就在前方。',
+  '别被恐惧和幻象牵着走，相信直觉，慢慢前行。',
+  '尽情绽放、享受当下，把温暖与喜悦分享出去。',
+  '倾听内心的召唤，原谅过去，迎接崭新的自己。',
+  '庆祝你的圆满与成就，再带着收获奔赴下一段旅程。',
+];
+
+/* 金色描边常量，供 SVG 牌背与曼陀罗复用 */
+const G='var(--gold-2)';
+
+/* 生成小星形路径 */
+function star(x,y,r){
+  return `<path d="M${x} ${y-r} L${x+r*0.28} ${y-r*0.28} L${x+r} ${y} L${x+r*0.28} ${y+r*0.28} L${x} ${y+r} L${x-r*0.28} ${y+r*0.28} L${x-r} ${y} L${x-r*0.28} ${y-r*0.28} Z" fill="${G}"/>`;
+}
+
+/* 生成华丽金色牌背 SVG（无文字，不泄露牌面身份） */
+function cardBackSVG(){
+  const cx=150, cy=236; /* 中心坐标 */
+  let rays=''; /* 放射光线字符串 */
+  for(let i=0;i<48;i++){ /* 循环绘制 48 道光线 */
+    const a=i*7.5*Math.PI/180, long=i%2===0, r1=48, r2=long?134:106; /* 角度与长短交替 */
+    rays+=`<line x1="${(cx+r1*Math.cos(a)).toFixed(1)}" y1="${(cy+r1*Math.sin(a)).toFixed(1)}" x2="${(cx+r2*Math.cos(a)).toFixed(1)}" y2="${(cy+r2*Math.sin(a)).toFixed(1)}" stroke="${G}" stroke-width="${long?1.1:0.55}" stroke-linecap="round" opacity="${long?0.95:0.65}"/>`;
+  }
+  let tips=''; /* 光圈上的小点 */
+  for(let i=0;i<24;i++){ const a=(i*15+7.5)*Math.PI/180, r=120; tips+=`<circle cx="${(cx+r*Math.cos(a)).toFixed(1)}" cy="${(cy+r*Math.sin(a)).toFixed(1)}" r="1.1" fill="${G}" opacity=".8"/>`; }
+  let stars=''; /* 角落装饰星 */
+  for(const [x,y,s] of [[64,116,5],[236,116,5],[58,330,4],[242,330,4],[150,66,6],[150,408,6],[92,200,3],[208,200,3]]) stars+=star(x,y,s);
+  const corner=(x,y,sx,sy)=>`<path d="M${x} ${y+30*sy} L${x} ${y} L${x+30*sx} ${y}" fill="none" stroke="${G}" stroke-width="1.4"/><path d="M${x+7*sx} ${y+7*sy} q${17*sx} ${2*sy} ${19*sx} ${19*sy}" fill="none" stroke="${G}" stroke-width="1"/><circle cx="${x}" cy="${y}" r="2.4" fill="${G}"/>${star(x+25*sx,y+25*sy,5)}`;
+  return `<svg viewBox="0 0 300 472" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="bbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b1030"/><stop offset=".5" stop-color="#080a1f"/><stop offset="1" stop-color="#04050e"/></linearGradient>
+      <linearGradient id="bframe" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f7ecc4"/><stop offset=".5" stop-color="#c79a3e"/><stop offset="1" stop-color="#8c6a24"/></linearGradient>
+      <radialGradient id="sunG" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="rgba(233,200,118,.28)"/><stop offset="1" stop-color="rgba(233,200,118,0)"/></radialGradient>
+    </defs>
+    <rect x="3" y="3" width="294" height="466" rx="15" fill="url(#bbg)" stroke="url(#bframe)" stroke-width="3"/>
+    <rect x="14" y="14" width="272" height="444" rx="10" fill="none" stroke="${G}" stroke-width="1.3" opacity=".85"/>
+    <rect x="20" y="20" width="260" height="432" rx="8" fill="none" stroke="${G}" stroke-width=".55" opacity=".5"/>
+    ${corner(30,30,1,1)}${corner(270,30,-1,1)}${corner(30,442,1,-1)}${corner(270,442,-1,-1)}
+    <circle cx="${cx}" cy="${cy}" r="120" fill="url(#sunG)"/>
+    ${rays}${tips}
+    <circle cx="${cx}" cy="${cy}" r="46" fill="#070a1c" stroke="${G}" stroke-width="1.6"/>
+    <circle cx="${cx}" cy="${cy}" r="40" fill="none" stroke="${G}" stroke-width=".55" opacity=".6"/>
+    <path d="M${cx-30} ${cy} Q${cx} ${cy-19} ${cx+30} ${cy} Q${cx} ${cy+19} ${cx-30} ${cy} Z" fill="none" stroke="${G}" stroke-width="1.6"/>
+    <circle cx="${cx}" cy="${cy}" r="11" fill="none" stroke="${G}" stroke-width="1.4"/>
+    <circle cx="${cx}" cy="${cy}" r="4.5" fill="${G}"/>
+    <path d="M${cx-30} ${cy} q-7 -5 -12 -3 M${cx+30} ${cy} q7 -5 12 -3" stroke="${G}" stroke-width="1" fill="none"/>
+    ${stars}
+  </svg>`;
+}
+
+/* 生成牌面图片 HTML */
+function faceHTML(i){ return `<img src="assets/cards/${i}.jpg" alt="${ARCANA[i].en}" draggable="false"/>`; }
+
+/* ---------- 构建命运之环（全部先显示牌背） ---------- */
+const ring=document.getElementById('ring'); /* 圆环 DOM */
+const N=ARCANA.length; /* 牌数量 22 */
+const STEP=360/N; /* 每张牌的角度步长 */
+const R=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--radius'))||560; /* 半径 */
+let BACK=cardBackSVG(); /* 当前牌背内容 */
+const cards=[]; /* 卡牌状态数组 */
+
+/* 逐张创建牌节点并放入圆环 */
+ARCANA.forEach((data,i)=>{
+  const el=document.createElement('div'); /* 创建卡牌容器 */
+  el.className='card'; /* 设置样式类 */
+  el.style.transform=`rotateY(${i*STEP}deg) translateZ(${R}px)`; /* 按角度分布在圆周上 */
+  el.innerHTML=`<div class="face">${BACK}</div>`; /* 填入牌背 */
+  el.dataset.i=i; /* 记录索引 */
+  el.addEventListener('click',()=>{ if(activeIndex()===i) drawCard(i); else rotateTo(i); }); /* 点击：正中抽牌，否则旋转到该牌 */
+  ring.appendChild(el); /* 挂到圆环 */
+  cards.push({el,data,used:false,idx:i}); /* 保存状态 */
+});
+
+/* 在环底创建黄色光点，贴近视频视觉 */
+(function buildOrbitDots(){
+  const wrap=document.createElement('div'); /* 光点容器 */
+  wrap.className='orbit-dots'; /* 3D 容器类 */
+  for(let i=0;i<N;i++){ /* 每张牌对应一个光点 */
+    const d=document.createElement('div'); /* 单个光点 */
+    d.className='orbit-dot'; /* 样式类 */
+    d.style.transform=`rotateY(${i*STEP}deg) translateZ(${R}px) translateY(${parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--card-h'))/2+18}px)`; /* 放到牌下方 */
+    wrap.appendChild(d); /* 加入容器 */
+  }
+  ring.appendChild(wrap); /* 挂到圆环一起旋转 */
+})();
+
+/* 若存在自定义牌背图片则替换 SVG */
+function applyBackImage(url){
+  BACK=`<img src="${url}" alt="" draggable="false"/>`; /* 换成图片牌背 */
+  cards.forEach(c=>{ if(!c.used) c.el.querySelector('.face').innerHTML=BACK; }); /* 更新未抽之牌 */
+}
+(function loadBack(){
+  const urls=['assets/back.png','assets/back.jpg','assets/back.webp','assets/back.jpeg']; /* 候选路径 */
+  let i=0; /* 当前尝试索引 */
+  (function nx(){
+    if(i>=urls.length)return; /* 全部失败则保留 SVG */
+    const u=urls[i++]; /* 取下一个 */
+    const im=new Image(); /* 预加载探测 */
+    im.onload=()=>applyBackImage(u); /* 成功则应用 */
+    im.onerror=nx; /* 失败继续 */
+    im.src=u; /* 开始加载 */
+  })();
+})();
+
+/* ---------- 旋转与渲染循环 ---------- */
+let rot=0, targetRot=0, vel=0, idle=true, lastInteract=0; /* 旋转状态机 */
+
+/* 根据当前角度计算正中牌索引 */
+function activeIndex(){ return ((Math.round(-rot/STEP)%N)+N)%N; }
+
+/* 平滑旋转到指定索引 */
+function rotateTo(i){ targetRot=-i*STEP; idle=false; lastInteract=performance.now(); }
+
+/* 每帧插值旋转并更新深度/高亮 */
+function frame(t){
+  if(idle && t-lastInteract>2600){ targetRot-=0.12; } /* 空闲时缓慢自转 */
+  targetRot+=vel; /* 叠加手势/键盘速度 */
+  vel*=0.86; /* 速度阻尼 */
+  rot+=(targetRot-rot)*0.12; /* 平滑跟随 */
+  ring.style.setProperty('--rot', rot.toFixed(2)+'deg'); /* 写入 CSS 变量 */
+  const ai=activeIndex(); /* 当前正中牌 */
+  cards.forEach((c,i)=>{
+    const ang=((i*STEP+rot)%360+360)%360, depth=Math.cos(ang*Math.PI/180); /* 计算朝向深度 */
+    if(!c.used){ c.el.style.opacity=(0.18+0.82*(depth+1)/2).toFixed(2); } /* 远处更透明 */
+    c.el.style.zIndex=Math.round(depth*100); /* 近处盖住远处 */
+    c.el.classList.toggle('active', i===ai && !c.used); /* 正中高亮 */
+  });
+  requestAnimationFrame(frame); /* 继续下一帧 */
+}
+requestAnimationFrame(frame); /* 启动循环 */
+
+/* ---------- 信息浮层（视频中的牌义面板） ---------- */
+const cardInfo=document.getElementById('cardInfo'); /* 浮层根节点 */
+const infoNum=document.getElementById('infoNum'); /* 编号+中文名 */
+const infoKey=document.getElementById('infoKey'); /* 关键词 */
+const infoDesc=document.getElementById('infoDesc'); /* 牌意正文 */
+let infoTimer=null; /* 自动隐藏计时器 */
+
+/* 显示某张牌的信息浮层 */
+function showCardInfo(data){
+  infoNum.textContent=`${data.n} ${data.cn}`; /* 例如 XII 倒吊人 */
+  infoKey.textContent=data.key; /* 关键词 */
+  infoDesc.textContent=data.m; /* 牌意 */
+  cardInfo.classList.add('on'); /* 显示动画 */
+  clearTimeout(infoTimer); /* 清旧计时 */
+  infoTimer=setTimeout(()=>cardInfo.classList.remove('on'), 4200); /* 数秒后淡出 */
+}
+
+/* ---------- 抽牌：飞向卡槽途中翻面 ---------- */
+const slots=[...document.querySelectorAll('.slot')]; /* 三个卡槽 */
+let drawn=0, drawnOrder=[]; /* 已抽数量与顺序 */
+
+/* 抽取正中或指定索引的牌 */
+function drawCard(i){
+  const c=cards[i]; /* 目标牌 */
+  if(!c || c.used || drawn>=3) return; /* 无效则退出 */
+  ensureAudio(); /* 解锁音频 */
+  c.used=true; drawnOrder.push(c); /* 标记已用 */
+  const slot=slots[drawn]; drawn++; /* 落到下一个槽 */
+  const fromRect=c.el.getBoundingClientRect(); /* 起点矩形 */
+  const toRect=slot.getBoundingClientRect(); /* 终点矩形 */
+
+  const flyer=document.createElement('div'); /* 飞行牌节点 */
+  flyer.className='flyer'; /* 样式类 */
+  flyer.style.cssText=`left:${fromRect.left}px; top:${fromRect.top}px; width:${fromRect.width}px; height:${fromRect.height}px;`; /* 定位到起点 */
+  flyer.innerHTML=`<div class="flip"><div class="fb">${BACK}</div><div class="ff">${faceHTML(i)}</div></div>`; /* 正反双面 */
+  flyer.querySelectorAll('.fb svg').forEach(s=>s.style.cssText='width:100%;height:100%;display:block'); /* SVG 铺满 */
+  document.body.appendChild(flyer); /* 插入页面 */
+
+  const dx=toRect.left-fromRect.left+(toRect.width-fromRect.width)/2; /* X 位移 */
+  const dy=toRect.top-fromRect.top+(toRect.height-fromRect.height)/2; /* Y 位移 */
+  const sc=toRect.width/fromRect.width, DUR=1150; /* 缩放与时长 */
+  flyer.animate([ /* 抛物线飞向卡槽 */
+    {transform:'translate(0,0) scale(1)', offset:0},
+    {transform:`translate(${dx*0.5}px,${dy*0.5-70}px) scale(${(1+sc)/2*1.18})`, offset:0.5},
+    {transform:`translate(${dx}px,${dy}px) scale(${sc})`, offset:1}
+  ],{duration:DUR, easing:'cubic-bezier(.3,.7,.2,1)', fill:'forwards'});
+  flyer.querySelector('.flip').animate([{transform:'rotateY(0deg)'},{transform:'rotateY(180deg)'}], /* 翻面 */
+    {duration:DUR, easing:'cubic-bezier(.4,0,.2,1)', fill:'forwards'});
+
+  setTimeout(()=>{ /* 翻到一半时播放音效与火花 */
+    flipSound();
+    const mx=fromRect.left+fromRect.width/2+dx*0.5, my=fromRect.top+fromRect.height/2+dy*0.5-70;
+    spawnSparkles(mx,my,46);
+  }, DUR*0.46);
+
+  let landed=false; /* 落地防重入 */
+  const land=()=>{
+    if(landed) return; landed=true; /* 只执行一次 */
+    flyer.remove(); /* 移除飞牌 */
+    slot.querySelector('.drawn').innerHTML=faceHTML(i); /* 槽内显示牌面 */
+    slot.querySelector('.name').textContent=c.data.cn; /* 槽下牌名 */
+    slot.querySelector('.ph').style.display='none'; /* 隐藏占位罗马数字 */
+    slot.classList.add('filled'); /* 标记已填满 */
+    const tr=slot.getBoundingClientRect(); spawnSparkles(tr.left+tr.width/2, tr.top+tr.height/2, 24); /* 落地火花 */
+    chime(); /* 落定音 */
+    showCardInfo(c.data); /* 弹出视频同款信息浮层 */
+    if(drawn>=3) showFinale(); /* 抽满三张进入终局 */
+  };
+  setTimeout(land, DUR+120); /* 动画结束后落地 */
+  setStatus(['第一张 · 过去','第二张 · 现在','第三张 · 未来'][drawn-1]+' 已揭示'); /* 更新状态 */
+}
+
+/* ---------- 状态文案 ---------- */
+const statusEl=document.getElementById('status'); /* 状态 DOM */
+let statusTimer; /* 重置计时器 */
+function setStatus(txt,sticky){
+  statusEl.textContent=txt; statusEl.style.opacity='.95'; clearTimeout(statusTimer); /* 立刻显示 */
+  if(!sticky) statusTimer=setTimeout(()=>{ /* 非粘性文案稍后恢复默认 */
+    if(drawn<3) statusEl.textContent= drawn? `已抽取 ${drawn} / 3 · 继续选择`:'拖动旋转命运之环 · 点击正中之牌抽取';
+  },2400);
+}
+
+/* ---------- 终局：三张牌解读 ---------- */
+const finale=document.getElementById('finale'), readingEl=document.getElementById('reading'); /* 终局面板 */
+
+/* 展示过去/现在/未来综合解读 */
+function showFinale(){
+  const order=drawnOrder, pos=['过去','现在','未来']; /* 顺序与位置名 */
+  const intro=['这段过往，奠定了你此刻的底色：','你正置身于此，这是当下的核心能量：','顺势而行，前方将这样展开：']; /* 引导句 */
+  const t0=order[0].data.key.split(' · ')[0], t1=order[1].data.key.split(' · ')[0], t2=order[2].data.key.split(' · ')[0]; /* 关键词首段 */
+  cardInfo.classList.remove('on'); /* 关闭单牌浮层，避免遮挡 */
+  readingEl.innerHTML=`
+    <h2>命运已揭示</h2>
+    <div class="sub">THE FATE RING · 为你抽取的三张指引之牌</div>
+    <div class="reading-cards">
+      ${order.map((c,k)=>`<div class="rcard"><div class="img">${faceHTML(c.idx)}</div><div class="pos">${pos[k]}</div><div class="cn">${c.data.cn}</div></div>`).join('')}
+    </div>
+    <div class="reading-text">
+      ${order.map((c,k)=>`<div class="li"><b>${pos[k]} · ${c.data.cn}</b>（${c.data.key}）<br/>${intro[k]}${c.data.m}<br/><span class="adv">▸ 指引：${ADV[c.idx]}</span></div>`).join('')}
+      <div class="sum">三张牌串成一条线索：你从「${t0}」一路走来，那段经历塑造了今天的你；此刻你正经历「${t1}」，这是当下最该专注的功课；而当你顺着内心去走，命运将引你抵达「${t2}」。<br/>命运之环已为你转动——牌只是镜子，真正的答案，始终在你心里。</div>
+    </div>
+    <button class="btn" id="finaleReset" style="margin-top:6px;">再问一次</button>`;
+  document.getElementById('finaleReset').onclick=resetAll; /* 绑定重置 */
+  setTimeout(()=>{ finale.classList.add('on'); spawnSparkles(innerWidth/2, innerHeight*0.4, 80); }, 650); /* 延迟弹出 */
+}
+
+/* 重新洗牌，清空状态 */
+function resetAll(){
+  drawn=0; drawnOrder=[]; finale.classList.remove('on'); cardInfo.classList.remove('on'); /* 复位计数与面板 */
+  cards.forEach(c=>{c.used=false; c.el.style.opacity=''; }); /* 恢复所有牌 */
+  slots.forEach(s=>{ s.classList.remove('filled'); s.querySelector('.drawn').innerHTML=''; s.querySelector('.name').textContent=''; s.querySelector('.ph').style.display=''; }); /* 清空卡槽 */
+  vel=(Math.random()*2-1)*6+9; /* 给一点随机旋转 */
+  setStatus('命运之环已重新洗牌',false); /* 提示 */
+}
+document.getElementById('resetBtn').onclick=resetAll; /* 底部重置按钮 */
+
+/* ---------- 鼠标 / 键盘控制 ---------- */
+let dragging=false,lastX=0; /* 拖拽状态 */
+const stage=document.querySelector('.stage'); /* 舞台区域 */
+stage.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;idle=false;lastInteract=performance.now();ensureAudio();}); /* 按下开始拖 */
+window.addEventListener('pointermove',e=>{ if(!dragging)return; const dx=e.clientX-lastX; lastX=e.clientX; targetRot+=dx*0.35; idle=false; lastInteract=performance.now();}); /* 拖动旋转 */
+window.addEventListener('pointerup',()=>{dragging=false; idle=true; lastInteract=performance.now();}); /* 松手 */
+window.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'){vel-=2.2;idle=false;lastInteract=performance.now();} /* 左箭头加速左转 */
+  if(e.key==='ArrowRight'){vel+=2.2;idle=false;lastInteract=performance.now();} /* 右箭头加速右转 */
+  if(e.key===' '){e.preventDefault();drawCard(activeIndex());} /* 空格抽正中牌 */
+});
+
+/* ---------- 粒子特效 ---------- */
+const fx=document.getElementById('fx'), fxc=fx.getContext('2d'); let parts=[]; /* 粒子数组 */
+function fxResize(){ fx.width=innerWidth; fx.height=innerHeight; } /* 画布跟窗口 */
+fxResize(); addEventListener('resize',fxResize); /* 初始化与监听 */
+function spawnSparkles(x,y,n){ /* 在坐标处喷射金色粒子 */
+  for(let i=0;i<n;i++){
+    const a=Math.random()*Math.PI*2, sp=Math.random()*4+1; /* 随机方向与速度 */
+    parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-1,life:1,r:Math.random()*2.4+0.8,c:Math.random()<.5?'247,236,196':'233,200,118'});
+  }
+}
+(function fxLoop(){ /* 粒子渲染循环 */
+  fxc.clearRect(0,0,fx.width,fx.height); /* 清屏 */
+  for(let i=parts.length-1;i>=0;i--){
+    const p=parts[i]; p.x+=p.vx; p.y+=p.vy; p.vy+=0.06; p.vx*=0.98; p.life-=0.018; /* 物理更新 */
+    if(p.life<=0){ parts.splice(i,1); continue; } /* 寿命结束移除 */
+    fxc.globalAlpha=Math.max(0,p.life); fxc.beginPath(); fxc.arc(p.x,p.y,p.r,0,7);
+    fxc.fillStyle=`rgba(${p.c},1)`; fxc.shadowBlur=10; fxc.shadowColor=`rgba(${p.c},.9)`; fxc.fill();
+  }
+  fxc.globalAlpha=1; fxc.shadowBlur=0; requestAnimationFrame(fxLoop); /* 下一帧 */
+})();
+
+/* ---------- 背景星空 ---------- */
+(function buildSky(){
+  const cv=document.getElementById('starfield'),ctx=cv.getContext('2d'); let stars=[]; /* 星星列表 */
+  function resize(){
+    cv.width=innerWidth;cv.height=innerHeight; /* 铺满 */
+    stars=Array.from({length:Math.round(innerWidth*innerHeight/6500)},()=>({x:Math.random()*cv.width,y:Math.random()*cv.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*0.02+0.003,g:Math.random()>0.93})); /* 生成星星 */
+  }
+  resize(); addEventListener('resize',resize); /* 自适应 */
+  (function tw(){
+    ctx.clearRect(0,0,cv.width,cv.height); /* 清屏 */
+    for(const st of stars){
+      st.a+=st.s;const al=0.3+Math.abs(Math.sin(st.a))*0.7; /* 闪烁相位 */
+      ctx.beginPath();ctx.arc(st.x,st.y,st.r,0,7);
+      ctx.fillStyle=st.g?`rgba(233,200,118,${al})`:`rgba(220,228,255,${al})`;ctx.fill(); /* 金色或冷白星 */
+    }
+    requestAnimationFrame(tw); /* 继续闪烁 */
+  })();
+})();
+
+/* ---------- 金色曼陀罗轨道图形 ---------- */
+(function buildMandala(){
+  function r(cx,cy,rd,seg,len,w){ /* 画一圈刻度线 */
+    let s='';
+    for(let i=0;i<seg;i++){
+      const a=i*360/seg*Math.PI/180;
+      s+=`<line x1="${cx+rd*Math.cos(a)}" y1="${cy+rd*Math.sin(a)}" x2="${cx+(rd+len)*Math.cos(a)}" y2="${cy+(rd+len)*Math.sin(a)}" stroke="${G}" stroke-width="${w}"/>`;
+    }
+    return s;
+  }
+  document.getElementById('mandalaA').innerHTML=`<g fill="none" stroke="${G}" stroke-width=".8" opacity=".9"><circle cx="200" cy="200" r="190"/><circle cx="200" cy="200" r="150"/><circle cx="200" cy="200" r="120"/>${r(200,200,150,48,10,.7)}${r(200,200,120,24,-12,.7)}${r(200,200,190,72,6,.5)}<circle cx="200" cy="200" r="60" stroke-width="1"/></g>`;
+  document.getElementById('mandalaB').innerHTML=`<g fill="none" stroke="${G}" stroke-width=".8" opacity=".9"><circle cx="200" cy="200" r="180"/><circle cx="200" cy="200" r="100"/>${r(200,200,100,36,14,.7)}${r(200,200,180,36,-16,.7)}<polygon points="200,40 360,300 40,300"/><polygon points="200,360 360,100 40,100"/></g>`;
+})();
+
+/* ============================================================ */
+/* 音频：WebAudio 合成翻牌/落定魔法音效                         */
+/* ============================================================ */
+let audioCtx=null, master=null; /* 音频上下文与主增益 */
+
+/* 用户交互后解锁音频 */
+function ensureAudio(){
+  if(audioCtx){ if(audioCtx.state==='suspended') audioCtx.resume(); return; }
+  try{ audioCtx=new (window.AudioContext||window.webkitAudioContext)(); master=audioCtx.createGain(); master.gain.value=0.5; master.connect(audioCtx.destination); }catch(e){}
+}
+
+/* 把音名转为频率 */
+function noteFreq(n){
+  const M={C:0,D:2,E:4,F:5,G:7,A:9,B:11}; let i=1, semi=M[n[0]];
+  if(n[1]==='#'){semi++;i=2;} else if(n[1]==='b'){semi--;i=2;}
+  const midi=(parseInt(n.slice(i),10)+1)*12+semi; return 440*Math.pow(2,(midi-69)/12);
+}
+
+/* 钢片琴音色：基频 + 泛音 */
+function celesta(freq,t,dur,peak){
+  if(!audioCtx)return; peak=peak||0.08;
+  [[1,1],[2,0.4],[3,0.12]].forEach(([mul,g])=>{
+    const o=audioCtx.createOscillator(),ga=audioCtx.createGain();
+    o.type='sine'; o.frequency.value=freq*mul;
+    ga.gain.setValueAtTime(0,t); ga.gain.linearRampToValueAtTime(peak*g,t+0.008); ga.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+    o.connect(ga).connect(master); o.start(t); o.stop(t+dur+0.03);
+  });
+}
+
+/* 翻牌上行琶音 */
+function flipSound(){
+  if(!audioCtx)return; const t=audioCtx.currentTime;
+  ['E6','G6','B6','D7','E7'].forEach((nn,k)=> celesta(noteFreq(nn), t+k*0.04, k===4?0.95:0.42, 0.07));
+}
+
+/* 落定确认音 */
+function chime(){
+  if(!audioCtx)return; const t=audioCtx.currentTime;
+  celesta(noteFreq('B5'),t,0.7,0.06); celesta(noteFreq('E6'),t+0.06,1.05,0.06);
+}
+
+/* ---------- MediaPipe 手势：移动旋转 + 捏合抽牌 ---------- */
+const camBtn=document.getElementById('camBtn'), camWrap=document.getElementById('camWrap'),
+      video=document.getElementById('cam'), overlay=document.getElementById('overlay'); /* 摄像头相关 DOM */
+let landmarker=null, camOn=false, pinchArmed=true; /* 模型与捏合防抖开关 */
+
+/* 点击开启/关闭手势识别 */
+camBtn.addEventListener('click', async ()=>{
+  ensureAudio(); /* 顺带解锁音频 */
+  if(camOn){ stopCam(); return; } /* 已开则关闭 */
+  camBtn.textContent='加载中…'; /* 加载态 */
+  try{
+    const {FilesetResolver, HandLandmarker} = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18'); /* 动态导入 MediaPipe */
+    const fileset = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'); /* WASM 资源 */
+    landmarker = await HandLandmarker.createFromOptions(fileset,{ /* 创建手部关键点模型 */
+      baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate:'GPU'},
+      runningMode:'VIDEO', numHands:1 });
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}}); /* 打开摄像头 */
+    video.srcObject=stream; await video.play(); /* 播放预览 */
+    camOn=true; camWrap.classList.add('on'); camBtn.textContent='关闭手势'; /* UI 切换 */
+    overlay.width=172; overlay.height=129; setStatus('请将手放入画面 · 移动手掌旋转 · 捏合抽牌',true); /* 提示 */
+    detectLoop(); /* 开始检测循环 */
+  }catch(err){
+    console.error(err); camBtn.textContent='开启手势';
+    setStatus('摄像头/模型加载失败，可改用鼠标或键盘（请用本地服务器打开）',false); /* file:// 常会失败 */
+  }
+});
+
+/* 停止摄像头 */
+function stopCam(){
+  camOn=false; camWrap.classList.remove('on'); camBtn.textContent='开启手势';
+  if(video.srcObject){video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null;}
+}
+
+let lastTs=-1; /* 避免同帧重复推理 */
+function detectLoop(){
+  if(!camOn)return; /* 已关闭则停 */
+  if(video.currentTime!==lastTs && landmarker){ /* 新帧才推理 */
+    lastTs=video.currentTime;
+    handleHand(landmarker.detectForVideo(video, performance.now())); /* 检测手势 */
+  }
+  requestAnimationFrame(detectLoop); /* 持续循环 */
+}
+
+/* 解析关键点：掌心偏移旋转，捏合抽牌 */
+function handleHand(res){
+  const o=overlay.getContext('2d'); o.clearRect(0,0,overlay.width,overlay.height); /* 清叠加层 */
+  if(!res.landmarks||!res.landmarks.length){ setStatus('未检测到手 · 请把手伸入画面',true); return; } /* 无手 */
+  const lm=res.landmarks[0]; /* 第一只手 */
+  o.fillStyle='rgba(233,200,118,.9)'; /* 金色关键点 */
+  for(const p of lm){ o.beginPath(); o.arc(p.x*overlay.width,p.y*overlay.height,2.2,0,7); o.fill(); } /* 画关键点 */
+  const off=lm[9].x-0.5; /* 中指根相对画面中心的水平偏移 */
+  if(Math.abs(off)>0.08){ vel+=off*1.4; idle=false; lastInteract=performance.now(); } /* 偏移足够则旋转牌环 */
+  const d=Math.hypot(lm[4].x-lm[8].x, lm[4].y-lm[8].y, (lm[4].z||0)-(lm[8].z||0)); /* 拇指-食指距离 */
+  if(d<0.055 && pinchArmed){ pinchArmed=false; drawCard(activeIndex()); } /* 捏合触发抽牌 */
+  if(d>0.10) pinchArmed=true; /* 松开后重新武装 */
+  if(camOn) setStatus(d<0.055?'✦ 捏合 · 抽取此牌':'移动手掌旋转 · 捏合抽牌',true); /* 实时状态 */
+}
+</script>
+</body>
+</html>
