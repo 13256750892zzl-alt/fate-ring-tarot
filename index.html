@@ -478,7 +478,7 @@ let lastAi=-1; /* 上一帧正中牌索引，避免每帧 toggle class */
 const lastOp=new Int8Array(N); /* 缓存每张牌透明度量化值（×20），避免 Float 比较误差 */
 const lastZ=new Int16Array(N); /* 缓存每张牌上次写入的 zIndex */
 for(let i=0;i<N;i++){ lastOp[i]=-1; lastZ[i]=-9999; } /* 初始化为哨兵值，强制首帧写入 */
-const CRUISE_SPEED=0.48; /* 手势挥动后的匀速转速（度/帧量级，经插值后观感平稳） */
+const CRUISE_SPEED=1.15; /* 手势挥动后的匀速转速（已加快，约每秒转过数张牌） */
 
 /* 根据当前角度计算正中牌索引 */
 function activeIndex(){ return ((Math.round(-rot/STEP)%N)+N)%N; }
