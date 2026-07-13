@@ -311,7 +311,7 @@
   <div class="hint">
     <b>鼠标</b> 拖动旋转 · 点击抽牌<br/>
     <b>键盘</b> ← → 旋转 · 空格抽牌<br/>
-    <b>手势</b> 移动手掌旋转 · 捏合抽牌
+    <b>手势</b> 五指并拢左右挥 · 攥拳抽牌
   </div>
 
   <!-- 三张牌终局解读面板 -->
@@ -760,15 +760,19 @@ function chime(){
   celesta(noteFreq('B5'),t,0.7,0.06); celesta(noteFreq('E6'),t+0.06,1.05,0.06);
 }
 
-/* ---------- MediaPipe 手势：移动旋转 + 捏合抽牌 ---------- */
+/* ---------- MediaPipe 手势：五指并拢挥动旋转 + 攥拳抽牌 ---------- */
 const camBtn=document.getElementById('camBtn'), camWrap=document.getElementById('camWrap'),
       video=document.getElementById('cam'), overlay=document.getElementById('overlay'); /* 摄像头相关 DOM */
 const overlayCtx=overlay.getContext('2d',{alpha:true,desynchronized:true}); /* 缓存 2d 上下文，避免每帧 getContext */
-let landmarker=null, camOn=false, pinchArmed=true; /* 模型与捏合防抖开关 */
-let smoothOff=0; /* 掌心水平偏移的 EMA 平滑值 */
+let landmarker=null, camOn=false; /* 模型与摄像头开关 */
 let lastDetectT=0; /* 上次推理的 performance 时间 */
 let mediaTs=0; /* MediaPipe VIDEO 模式要求严格递增的毫秒时间戳 */
 let missFrames=0; /* 连续未检测到手的帧数，用于稳定提示 */
+let fistArmed=true; /* 攥拳防抖：松开/换姿后才可再抽 */
+let fistHold=0; /* 连续识别为拳的帧数，防误触 */
+let flatHold=0; /* 连续识别为五指并拢的帧数 */
+let lastPalmX=null; /* 上一帧掌心屏幕 X（已镜像），用于算挥动速度 */
+let poseLabel='none'; /* 当前姿态文案用：flat / fist / other / none */
 const DETECT_MS=33; /* 约 30fps 推理，兼顾灵敏度与流畅 */
 const MODEL_URL=new URL('assets/mediapipe/hand_landmarker.task', location.href).href; /* 自托管模型，避免 Google 存储在国内不可达 */
 const VISION_CDNS=[ /* MediaPipe 运行时 CDN 候选：国内镜像优先 */
@@ -785,6 +789,38 @@ const HAND_CONNECTIONS=[
   [0,17],[17,18],[18,19],[19,20],
   [5,9],[9,13],[13,17]
 ];
+
+/* 两点归一化距离 */
+function lmDist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+/* 手指是否伸直：指尖比指根离手腕更远 */
+function fingerOpen(lm, tip, mcp){ return lmDist(lm[tip], lm[0]) > lmDist(lm[mcp], lm[0])*1.18; }
+
+/* 手指是否弯曲：指尖收回靠近掌心/手腕 */
+function fingerCurl(lm, tip, mcp){ return lmDist(lm[tip], lm[0]) < lmDist(lm[mcp], lm[0])*1.22; }
+
+/* 攥拳：四指弯曲，指尖靠近掌心 */
+function isFistPose(lm){
+  const curls=[ /* 食中无名小 */
+    fingerCurl(lm,8,5), fingerCurl(lm,12,9), fingerCurl(lm,16,13), fingerCurl(lm,20,17)
+  ].filter(Boolean).length; /* 弯曲指数 */
+  const tipNearPalm=[8,12,16,20].every(i=>lmDist(lm[i], lm[9])<0.16); /* 指尖靠掌心 */
+  return curls>=3 && tipNearPalm; /* 至少三指弯曲且指尖收拢 */
+}
+
+/* 五指并拢：四指伸直，相邻指尖贴近（掌心面向镜头） */
+function isFlatTogetherPose(lm){
+  if(isFistPose(lm)) return false; /* 拳优先排除 */
+  const opens=[ /* 四指伸直 */
+    fingerOpen(lm,8,5), fingerOpen(lm,12,9), fingerOpen(lm,16,13), fingerOpen(lm,20,17)
+  ].filter(Boolean).length;
+  if(opens<3) return false; /* 至少三指伸直 */
+  const gap08=lmDist(lm[8], lm[12]); /* 食-中 */
+  const gap12=lmDist(lm[12], lm[16]); /* 中-无名 */
+  const gap16=lmDist(lm[16], lm[20]); /* 无名-小 */
+  const together=gap08<0.095 && gap12<0.095 && gap16<0.11; /* 并拢阈值 */
+  return together; /* 伸直且并拢 */
+}
 
 /* 依次尝试多个 CDN，加载 FilesetResolver + HandLandmarker */
 async function loadVisionRuntime(){
@@ -817,7 +853,7 @@ async function createHandLandmarker(HandLandmarker, fileset){
   }
 }
 
-/* 打开摄像头：识别需要足够分辨率，320 太容易丢手 */
+/* 打开摄像头：识别需要足够分辨率 */
 async function openCameraStream(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ /* 环境不支持 */
     throw new Error('当前浏览器不支持摄像头（需 HTTPS 或 localhost）'); /* 明确提示 */
@@ -850,6 +886,11 @@ function waitForVideoFrame(){
   });
 }
 
+/* 重置手势状态机 */
+function resetGestureState(){
+  fistArmed=true; fistHold=0; flatHold=0; lastPalmX=null; poseLabel='none'; missFrames=0; /* 全部复位 */
+}
+
 /* 点击开启/关闭手势识别 */
 camBtn.addEventListener('click', async ()=>{
   ensureAudio(); /* 顺带解锁音频 */
@@ -865,9 +906,9 @@ camBtn.addEventListener('click', async ()=>{
     const {HandLandmarker, fileset}=await loadVisionRuntime(); /* 再加载运行时 */
     landmarker=await createHandLandmarker(HandLandmarker, fileset); /* 创建检测器 */
     camOn=true; camBtn.textContent='关闭手势'; camBtn.disabled=false; /* UI 就绪 */
-    smoothOff=0; lastDetectT=0; mediaTs=0; lastTs=-1; missFrames=0; pinchArmed=true; /* 重置状态 */
+    lastDetectT=0; mediaTs=0; resetGestureState(); /* 重置时间戳与手势状态 */
     lastStatusTxt=''; /* 允许写入开场提示 */
-    setStatus('请将手掌正对镜头 · 左右移动旋转 · 捏合抽牌',true); /* 提示 */
+    setStatus('五指并拢左右挥动旋转 · 攥拳抽取正中之牌',true); /* 提示新规则 */
     detectLoop(performance.now()); /* 开始检测循环 */
   }catch(err){
     console.error(err); /* 控制台保留详细错误 */
@@ -883,10 +924,9 @@ function stopCam(){
   camOn=false; camWrap.classList.remove('on'); camBtn.textContent='开启手势'; camBtn.disabled=false;
   if(video.srcObject){video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null;}
   overlayCtx.clearRect(0,0,overlay.width,overlay.height); /* 清关键点叠加 */
-  smoothOff=0; missFrames=0; /* 复位滤波与丢帧计数 */
+  resetGestureState(); /* 复位手势状态 */
 }
 
-let lastTs=-1; /* 兼容保留：不再用 currentTime 判重（Edge 直播流常不更新） */
 function detectLoop(t){
   if(!camOn)return; /* 已关闭则停 */
   requestAnimationFrame(detectLoop); /* 先挂下一帧，避免推理阻塞导致循环中断 */
@@ -898,7 +938,7 @@ function detectLoop(t){
   mediaTs+=dt; /* 严格递增时间戳，满足 detectForVideo 合同 */
   syncOverlayToVideo(); /* 分辨率变化时重同步 */
   try{
-    handleHand(landmarker.detectForVideo(video, mediaTs)); /* 推理并驱动交互 */
+    handleHand(landmarker.detectForVideo(video, mediaTs), dt); /* 推理并驱动交互 */
   }catch(err){
     console.warn('detectForVideo 异常', err); /* 单帧失败不中断循环 */
   }
@@ -919,11 +959,12 @@ function pickPrimaryHand(landmarks){
   return best; /* 主操控手 */
 }
 
-/* 在叠加层画骨架 + 关键点，便于确认识别是否生效 */
-function drawHandOverlay(lm){
+/* 在叠加层画骨架；按姿态换色提示当前规则 */
+function drawHandOverlay(lm, pose){
   const w=overlay.width, h=overlay.height; /* 画布尺寸 */
+  const col=pose==='fist'?'rgba(255,170,90,.9)':pose==='flat'?'rgba(233,200,118,.85)':'rgba(180,190,220,.7)'; /* 拳偏暖、并拢金色、其他冷白 */
   overlayCtx.lineWidth=Math.max(2, w/160); /* 线宽随分辨率变化 */
-  overlayCtx.strokeStyle='rgba(233,200,118,.75)'; /* 金色骨架 */
+  overlayCtx.strokeStyle=col; /* 骨架色 */
   overlayCtx.beginPath(); /* 一次描完所有连线 */
   for(const [a,b] of HAND_CONNECTIONS){ /* 逐段连接 */
     const p=lm[a], q=lm[b]; /* 两端关键点 */
@@ -938,44 +979,61 @@ function drawHandOverlay(lm){
     overlayCtx.arc(p.x*w, p.y*h, r, 0, Math.PI*2); /* 圆点 */
   }
   overlayCtx.fill(); /* 填充 */
-  /* 拇指尖与食指尖高亮，提示捏合判定点 */
-  for(const i of [4,8]){ /* 4=拇指尖 8=食指尖 */
-    const p=lm[i]; /* 取点 */
-    overlayCtx.beginPath(); overlayCtx.arc(p.x*w, p.y*h, r*1.6, 0, Math.PI*2); /* 更大的圈 */
-    overlayCtx.strokeStyle='rgba(255,255,255,.9)'; overlayCtx.lineWidth=2; overlayCtx.stroke(); /* 白圈 */
-  }
 }
 
-/* 解析关键点：掌心偏移旋转，捏合抽牌（镜像画面下校正方向） */
-function handleHand(res){
+/* 解析关键点：五指并拢挥动旋转，攥拳抽正中牌 */
+function handleHand(res, dt){
   overlayCtx.clearRect(0,0,overlay.width,overlay.height); /* 清叠加层 */
   if(!res||!res.landmarks||!res.landmarks.length){ /* 无手 */
     missFrames++; /* 累计丢检 */
-    smoothOff*=0.75; /* 丢手时衰减偏移，避免速度突然归零抽搐 */
-    if(missFrames>8) setStatus('未检测到手 · 请把手掌正对镜头、光线亮一点',true); /* 稳定后再提示 */
+    lastPalmX=null; fistHold=0; flatHold=0; poseLabel='none'; /* 丢手清空轨迹 */
+    if(missFrames>8) setStatus('未检测到手 · 五指并拢挥动 · 攥拳抽牌',true); /* 稳定后再提示 */
     return;
   }
   missFrames=0; /* 复位丢检 */
   const lm=pickPrimaryHand(res.landmarks); /* 选主手 */
-  drawHandOverlay(lm); /* 画骨架反馈 */
+  const fist=isFistPose(lm); /* 是否攥拳 */
+  const flat=!fist && isFlatTogetherPose(lm); /* 是否五指并拢（拳优先） */
+  poseLabel=fist?'fist':flat?'flat':'other'; /* 记录姿态 */
+  drawHandOverlay(lm, poseLabel); /* 画骨架反馈 */
 
-  /* 镜像预览下：用户朝屏幕右侧挥手 → 原始帧 x 变小，故取反使操控方向符合直觉 */
-  const rawOff=0.5-lm[9].x; /* 中指根相对中心（已镜像校正） */
-  smoothOff+=(rawOff-smoothOff)*0.45; /* EMA：更快跟随，仍抑抖 */
-  const dead=0.04; /* 死区略缩小，轻微移动也能驱动 */
-  if(Math.abs(smoothOff)>dead){ /* 超出死区才旋转 */
-    const push=Math.max(-1.15, Math.min(1.15, (smoothOff-Math.sign(smoothOff)*dead)*1.55)); /* 限幅并减去死区 */
-    vel+=push; idle=false; lastInteract=performance.now(); /* 写入旋转速度 */
+  /* 镜像预览坐标：屏幕右侧 = 1 - 原始 x */
+  const palmX=1-lm[9].x; /* 掌心屏幕水平位置 0~1 */
+
+  if(flat){ /* 规则1：五指并拢 → 左右挥动驱动牌环 */
+    flatHold++; fistHold=0; /* 并拢累计，清拳头计数 */
+    if(flatHold>=2 && lastPalmX!=null){ /* 稳定两帧后再算速度，减少抖动 */
+      const dx=palmX-lastPalmX; /* 屏幕坐标增量：右为正 */
+      const speed=dx/(dt/1000); /* 归一化速度（每秒） */
+      if(Math.abs(dx)>0.004){ /* 过滤微小抖动 */
+        const push=Math.max(-1.6, Math.min(1.6, speed*0.55)); /* 映射为旋转冲量并限幅 */
+        vel+=push; idle=false; lastInteract=performance.now(); /* 写入速度：右挥→牌环右/顺势转 */
+      }
+    }
+    lastPalmX=palmX; /* 更新轨迹 */
+    if(flatHold>=2) fistArmed=true; /* 并拢挥动期间允许下次攥拳抽牌 */
+    setStatus('✦ 五指并拢 · 左右挥动旋转牌环',true); /* 状态提示 */
+    return;
   }
 
-  /* 捏合用二维距离更稳（z 噪声大会导致很难触发） */
-  const d=Math.hypot(lm[4].x-lm[8].x, lm[4].y-lm[8].y); /* 拇指-食指像素归一化距离 */
-  if(d<0.065 && pinchArmed){ /* 捏合阈值略放宽 */
-    pinchArmed=false; /* 防抖：一次捏合只抽一张 */
-    drawCard(activeIndex()); /* 抽取正中牌 */
+  if(fist){ /* 规则2：攥拳 → 抽取当前正中牌 */
+    flatHold=0; lastPalmX=null; /* 清挥动轨迹，避免松拳后乱转 */
+    fistHold++; /* 连续握拳帧 */
+    if(fistHold>=4 && fistArmed){ /* 约 0.13s 确认，防误触 */
+      fistArmed=false; /* 本轮只抽一次 */
+      fistHold=0; /* 重置计数 */
+      drawCard(activeIndex()); /* 选中当时正中那张 */
+      setStatus('✦ 攥拳 · 已抽取正中之牌',true); /* 反馈 */
+    }else{
+      setStatus(fistArmed?'✦ 攥拳中 · 选中正中之牌':'攥拳已触发 · 请先五指并拢再抽下一张',true); /* 提示 */
+    }
+    return;
   }
-  if(d>0.11) pinchArmed=true; /* 松开足够大才重新武装 */
-  if(camOn) setStatus(d<0.065?'✦ 捏合 · 抽取此牌':'已识别手势 · 左右移动旋转 · 捏合抽牌',true); /* 实时状态 */
+
+  /* 其他手势：不驱动，等待并拢或攥拳 */
+  flatHold=0; fistHold=0; lastPalmX=null; /* 清空中间态 */
+  if(!fistArmed) fistArmed=true; /* 非拳姿态视为松开，重新武装抽牌 */
+  setStatus('请五指并拢左右挥 · 或攥拳抽取正中之牌',true); /* 引导 */
 }
 </script>
 </body>
