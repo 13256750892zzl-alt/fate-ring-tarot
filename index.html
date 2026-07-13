@@ -766,30 +766,77 @@ let landmarker=null, camOn=false, pinchArmed=true; /* 模型与捏合防抖开�
 let smoothOff=0; /* 掌心水平偏移的 EMA 平滑值 */
 let lastDetectT=0; /* 上次推理时间戳 */
 const DETECT_MS=50; /* 推理间隔约 20fps，给牌环/粒子留出主线程时间 */
+const MODEL_URL=new URL('assets/mediapipe/hand_landmarker.task', location.href).href; /* 自托管模型，避免 Google 存储在国内不可达 */
+const VISION_CDNS=[ /* MediaPipe 运行时 CDN 候选：国内镜像优先 */
+  'https://cdn.jsdmirror.com/npm/@mediapipe/tasks-vision@0.10.18',
+  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18',
+  'https://unpkg.com/@mediapipe/tasks-vision@0.10.18'
+];
+
+/* 依次尝试多个 CDN，加载 FilesetResolver + HandLandmarker */
+async function loadVisionRuntime(){
+  let lastErr=null; /* 记录最后一次失败原因 */
+  for(const base of VISION_CDNS){ /* 逐个 CDN 尝试 */
+    try{
+      const mod=await import(base); /* 动态导入 ESM 包 */
+      const fileset=await mod.FilesetResolver.forVisionTasks(`${base}/wasm`); /* 加载 WASM 目录 */
+      return {HandLandmarker:mod.HandLandmarker, fileset}; /* 成功则返回 */
+    }catch(err){ lastErr=err; console.warn('MediaPipe CDN 失败', base, err); } /* 记录并换下一个 */
+  }
+  throw lastErr||new Error('MediaPipe CDN 全部不可用'); /* 全部失败再抛出 */
+}
+
+/* 创建手部模型：优先 GPU，失败回退 CPU */
+async function createHandLandmarker(HandLandmarker, fileset){
+  const common={runningMode:'VIDEO', numHands:1}; /* 视频模式、单手 */
+  try{
+    return await HandLandmarker.createFromOptions(fileset,{ /* 先试 GPU 加速 */
+      ...common, baseOptions:{modelAssetPath:MODEL_URL, delegate:'GPU'} });
+  }catch(err){
+    console.warn('GPU 委托失败，回退 CPU', err); /* 部分设备 WebGL 受限 */
+    return await HandLandmarker.createFromOptions(fileset,{ /* 再试 CPU */
+      ...common, baseOptions:{modelAssetPath:MODEL_URL, delegate:'CPU'} });
+  }
+}
+
+/* 打开摄像头：约束失败时降级为最简 video:true */
+async function openCameraStream(){
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ /* 环境不支持 */
+    throw new Error('当前浏览器不支持摄像头（需 HTTPS 或 localhost）'); /* 明确提示 */
+  }
+  try{
+    return await navigator.mediaDevices.getUserMedia({ /* 优先低分辨率，减轻负载 */
+      video:{facingMode:'user', width:{ideal:320}, height:{ideal:240}} });
+  }catch(err){
+    console.warn('指定约束失败，改用默认摄像头', err); /* 兼容旧设备 */
+    return await navigator.mediaDevices.getUserMedia({video:true}); /* 最简约束再试 */
+  }
+}
 
 /* 点击开启/关闭手势识别 */
 camBtn.addEventListener('click', async ()=>{
   ensureAudio(); /* 顺带解锁音频 */
   if(camOn){ stopCam(); return; } /* 已开则关闭 */
-  camBtn.textContent='加载中…'; /* 加载态 */
+  camBtn.textContent='加载中…'; camBtn.disabled=true; /* 加载态并防连点 */
   try{
-    const {FilesetResolver, HandLandmarker} = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18'); /* 动态导入 MediaPipe */
-    const fileset = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm'); /* WASM 资源 */
-    landmarker = await HandLandmarker.createFromOptions(fileset,{ /* 创建手部关键点模型 */
-      baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate:'GPU'},
-      runningMode:'VIDEO', numHands:1 });
-    const stream = await navigator.mediaDevices.getUserMedia({ /* 打开摄像头：低分辨率即可，显著减轻解码与推理 */
-      video:{width:{ideal:320}, height:{ideal:240}, frameRate:{ideal:24, max:30}} });
-    video.srcObject=stream; await video.play(); /* 播放预览 */
-    camOn=true; camWrap.classList.add('on'); camBtn.textContent='关闭手势'; /* UI 切换 */
+    const stream=await openCameraStream(); /* 先开摄像头，避免模型失败时完全无反馈 */
+    video.srcObject=stream; await video.play(); /* 立即显示预览 */
+    camWrap.classList.add('on'); /* 先显示摄像头窗 */
+    setStatus('摄像头已打开 · 正在加载手势模型…',true); /* 阶段提示 */
+    const {HandLandmarker, fileset}=await loadVisionRuntime(); /* 再加载运行时 */
+    landmarker=await createHandLandmarker(HandLandmarker, fileset); /* 创建检测器 */
+    camOn=true; camBtn.textContent='关闭手势'; camBtn.disabled=false; /* UI 就绪 */
     overlay.width=172; overlay.height=129; /* 叠加层尺寸固定 */
     smoothOff=0; lastDetectT=0; lastTs=-1; /* 重置手势滤波与帧缓存 */
     lastStatusTxt=''; /* 允许写入开场提示 */
     setStatus('请将手放入画面 · 移动手掌旋转 · 捏合抽牌',true); /* 提示 */
     detectLoop(performance.now()); /* 开始检测循环 */
   }catch(err){
-    console.error(err); camBtn.textContent='开启手势';
-    setStatus('摄像头/模型加载失败，可改用鼠标或键盘（请用本地服务器打开）',false); /* file:// 常会失败 */
+    console.error(err); /* 控制台保留详细错误 */
+    stopCam(); /* 清理可能已打开的摄像头 */
+    camBtn.textContent='开启手势'; camBtn.disabled=false; /* 恢复按钮 */
+    const tip=(err&&err.message)?String(err.message).slice(0,80):'未知错误'; /* 截断错误文案 */
+    setStatus(`手势启动失败：${tip} · 可改用鼠标/键盘`,false); /* 给出可读原因 */
   }
 });
 
