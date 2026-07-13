@@ -107,10 +107,10 @@
     position:relative; width:var(--card-w); height:var(--card-h); transform-style:preserve-3d;
     transform:translateY(-6px) rotateX(9deg) rotateY(var(--rot,0deg)); will-change:transform;
   }
-  /* 环上的单张卡牌 */
+  /* 环上的单张卡牌（contain 降低重绘范围；去掉 filter transition 避免与 JS 抢主线程） */
   .card{
     position:absolute; inset:0; width:var(--card-w); height:var(--card-h); transform-style:preserve-3d;
-    backface-visibility:hidden; cursor:pointer; transition:filter .3s ease;
+    backface-visibility:hidden; cursor:pointer; contain:layout style;
   }
   /* 牌面容器 */
   .card .face{
@@ -121,9 +121,11 @@
   .card svg{display:block; width:100%; height:100%;}
   /* 牌面图片铺满裁切 */
   .card .face img,.fb img{width:100%; height:100%; object-fit:cover; display:block; image-rendering:auto;}
-  /* 正中选中牌高亮 */
-  .card.active{filter:drop-shadow(0 0 22px rgba(233,200,118,.9)) brightness(1.14);}
-  /* 已抽取的牌变暗 */
+  /* 正中选中牌高亮：用 box-shadow 代替昂贵的 filter:drop-shadow */
+  .card.active .face{
+    box-shadow:0 0 28px rgba(233,200,118,.95), 0 10px 34px rgba(0,0,0,.6), inset 0 0 0 3px var(--gold-3);
+  }
+  /* 已抽取的牌变暗（仅 used 时用 filter，数量少可接受） */
   .card.used{opacity:.18 !important; filter:grayscale(.6) brightness(.4); cursor:default;}
   /* 环底黄色光点轨道（视频同款） */
   .orbit-dots{
@@ -470,6 +472,10 @@ function applyBackImage(url){
 
 /* ---------- 旋转与渲染循环 ---------- */
 let rot=0, targetRot=0, vel=0, idle=true, lastInteract=0; /* 旋转状态机 */
+let lastAi=-1; /* 上一帧正中牌索引，避免每帧 toggle class */
+const lastOp=new Int8Array(N); /* 缓存每张牌透明度量化值（×20），避免 Float 比较误差 */
+const lastZ=new Int16Array(N); /* 缓存每张牌上次写入的 zIndex */
+for(let i=0;i<N;i++){ lastOp[i]=-1; lastZ[i]=-9999; } /* 初始化为哨兵值，强制首帧写入 */
 
 /* 根据当前角度计算正中牌索引 */
 function activeIndex(){ return ((Math.round(-rot/STEP)%N)+N)%N; }
@@ -477,20 +483,32 @@ function activeIndex(){ return ((Math.round(-rot/STEP)%N)+N)%N; }
 /* 平滑旋转到指定索引 */
 function rotateTo(i){ targetRot=-i*STEP; idle=false; lastInteract=performance.now(); }
 
-/* 每帧插值旋转并更新深度/高亮 */
+/* 每帧插值旋转并更新深度/高亮（仅在值变化时写 DOM） */
 function frame(t){
   if(idle && t-lastInteract>2600){ targetRot-=0.12; } /* 空闲时缓慢自转 */
   targetRot+=vel; /* 叠加手势/键盘速度 */
   vel*=0.86; /* 速度阻尼 */
   rot+=(targetRot-rot)*0.12; /* 平滑跟随 */
-  ring.style.setProperty('--rot', rot.toFixed(2)+'deg'); /* 写入 CSS 变量 */
+  ring.style.setProperty('--rot', rot.toFixed(2)+'deg'); /* 写入 CSS 变量驱动圆环旋转 */
   const ai=activeIndex(); /* 当前正中牌 */
-  cards.forEach((c,i)=>{
-    const ang=((i*STEP+rot)%360+360)%360, depth=Math.cos(ang*Math.PI/180); /* 计算朝向深度 */
-    if(!c.used){ c.el.style.opacity=(0.18+0.82*(depth+1)/2).toFixed(2); } /* 远处更透明 */
-    c.el.style.zIndex=Math.round(depth*100); /* 近处盖住远处 */
-    c.el.classList.toggle('active', i===ai && !c.used); /* 正中高亮 */
-  });
+  for(let i=0;i<N;i++){ /* 用 for 循环避免 forEach 回调开销 */
+    const c=cards[i]; /* 取卡牌状态 */
+    const ang=((i*STEP+rot)%360+360)%360; /* 当前世界角 */
+    const depth=Math.cos(ang*Math.PI/180); /* 朝向深度：1=正中，-1=背面 */
+    if(!c.used){ /* 未抽取的牌才更新透明度 */
+      const opQ=Math.round((0.18+0.82*(depth+1)/2)*20); /* 量化为整数档位，减少无效写入 */
+      if(opQ!==lastOp[i]){ lastOp[i]=opQ; c.el.style.opacity=opQ/20; } /* 仅变化时写 style */
+    }
+    const z=(depth*100)|0; /* 位运算取整，近处盖住远处 */
+    if(z!==lastZ[i]){ lastZ[i]=z; c.el.style.zIndex=z; } /* 仅变化时写 zIndex */
+  }
+  if(ai!==lastAi){ /* 正中牌切换时才改 active 类，避免每帧 classList.toggle */
+    if(lastAi>=0 && cards[lastAi]) cards[lastAi].el.classList.remove('active'); /* 去掉旧高亮 */
+    if(!cards[ai].used) cards[ai].el.classList.add('active'); /* 给新正中加高亮 */
+    lastAi=ai; /* 记住本帧索引 */
+  }else if(cards[ai].used && cards[ai].el.classList.contains('active')){ /* 正中牌刚被抽走时清高亮 */
+    cards[ai].el.classList.remove('active'); /* 移除残留 active */
+  }
   requestAnimationFrame(frame); /* 继续下一帧 */
 }
 requestAnimationFrame(frame); /* 启动循环 */
@@ -522,6 +540,8 @@ function drawCard(i){
   if(!c || c.used || drawn>=3) return; /* 无效则退出 */
   ensureAudio(); /* 解锁音频 */
   c.used=true; drawnOrder.push(c); /* 标记已用 */
+  c.el.classList.add('used'); /* 环上原位牌立刻变暗，走 CSS 而非每帧改 opacity */
+  c.el.classList.remove('active'); /* 抽走后去掉高亮 */
   const slot=slots[drawn]; drawn++; /* 落到下一个槽 */
   const fromRect=c.el.getBoundingClientRect(); /* 起点矩形 */
   const toRect=slot.getBoundingClientRect(); /* 终点矩形 */
@@ -570,9 +590,13 @@ function drawCard(i){
 /* ---------- 状态文案 ---------- */
 const statusEl=document.getElementById('status'); /* 状态 DOM */
 let statusTimer; /* 重置计时器 */
+let lastStatusTxt=''; /* 上次文案，避免手势循环每帧写 DOM */
 function setStatus(txt,sticky){
+  if(txt===lastStatusTxt) return; /* 文案未变则跳过，杜绝布局抖动 */
+  lastStatusTxt=txt; /* 记录本次文案 */
   statusEl.textContent=txt; statusEl.style.opacity='.95'; clearTimeout(statusTimer); /* 立刻显示 */
   if(!sticky) statusTimer=setTimeout(()=>{ /* 非粘性文案稍后恢复默认 */
+    lastStatusTxt=''; /* 允许恢复后再次写入相同粘性文案 */
     if(drawn<3) statusEl.textContent= drawn? `已抽取 ${drawn} / 3 · 继续选择`:'拖动旋转命运之环 · 点击正中之牌抽取';
   },2400);
 }
@@ -604,9 +628,11 @@ function showFinale(){
 /* 重新洗牌，清空状态 */
 function resetAll(){
   drawn=0; drawnOrder=[]; finale.classList.remove('on'); cardInfo.classList.remove('on'); /* 复位计数与面板 */
-  cards.forEach(c=>{c.used=false; c.el.style.opacity=''; }); /* 恢复所有牌 */
+  cards.forEach((c,i)=>{c.used=false; c.el.style.opacity=''; c.el.classList.remove('active','used'); lastOp[i]=-1; lastZ[i]=-9999;}); /* 恢复牌并重置样式缓存 */
+  lastAi=-1; /* 强制下一帧重新计算 active */
   slots.forEach(s=>{ s.classList.remove('filled'); s.querySelector('.drawn').innerHTML=''; s.querySelector('.name').textContent=''; s.querySelector('.ph').style.display=''; }); /* 清空卡槽 */
   vel=(Math.random()*2-1)*6+9; /* 给一点随机旋转 */
+  lastStatusTxt=''; /* 允许状态文案重新写入 */
   setStatus('命运之环已重新洗牌',false); /* 提示 */
 }
 document.getElementById('resetBtn').onclick=resetAll; /* 底部重置按钮 */
@@ -624,40 +650,54 @@ window.addEventListener('keydown',e=>{
 });
 
 /* ---------- 粒子特效 ---------- */
-const fx=document.getElementById('fx'), fxc=fx.getContext('2d'); let parts=[]; /* 粒子数组 */
-function fxResize(){ fx.width=innerWidth; fx.height=innerHeight; } /* 画布跟窗口 */
+const fx=document.getElementById('fx'), fxc=fx.getContext('2d',{alpha:true,desynchronized:true}); let parts=[]; /* 粒子数组；desynchronized 降低合成延迟 */
+let fxEmpty=true; /* 上一帧是否已清空，避免空粒子时每帧 clearRect */
+function fxResize(){ fx.width=innerWidth; fx.height=innerHeight; fxEmpty=false; } /* 画布跟窗口；标记需重清 */
 fxResize(); addEventListener('resize',fxResize); /* 初始化与监听 */
 function spawnSparkles(x,y,n){ /* 在坐标处喷射金色粒子 */
   for(let i=0;i<n;i++){
     const a=Math.random()*Math.PI*2, sp=Math.random()*4+1; /* 随机方向与速度 */
     parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp-1,life:1,r:Math.random()*2.4+0.8,c:Math.random()<.5?'247,236,196':'233,200,118'});
   }
+  fxEmpty=false; /* 有粒子后需要绘制 */
 }
 (function fxLoop(){ /* 粒子渲染循环 */
+  if(!parts.length){ /* 无粒子时跳过昂贵绘制 */
+    if(!fxEmpty){ fxc.clearRect(0,0,fx.width,fx.height); fxEmpty=true; } /* 只清一次屏 */
+    requestAnimationFrame(fxLoop); return; /* 空闲让出主线程 */
+  }
   fxc.clearRect(0,0,fx.width,fx.height); /* 清屏 */
   for(let i=parts.length-1;i>=0;i--){
     const p=parts[i]; p.x+=p.vx; p.y+=p.vy; p.vy+=0.06; p.vx*=0.98; p.life-=0.018; /* 物理更新 */
     if(p.life<=0){ parts.splice(i,1); continue; } /* 寿命结束移除 */
-    fxc.globalAlpha=Math.max(0,p.life); fxc.beginPath(); fxc.arc(p.x,p.y,p.r,0,7);
-    fxc.fillStyle=`rgba(${p.c},1)`; fxc.shadowBlur=10; fxc.shadowColor=`rgba(${p.c},.9)`; fxc.fill();
+    const a=Math.max(0,p.life); /* 透明度 */
+    fxc.beginPath(); fxc.arc(p.x,p.y,p.r*2.2,0,7); /* 外层软光晕（替代 shadowBlur） */
+    fxc.fillStyle=`rgba(${p.c},${a*0.25})`; fxc.fill(); /* 半透明光晕 */
+    fxc.beginPath(); fxc.arc(p.x,p.y,p.r,0,7); /* 实心内核 */
+    fxc.fillStyle=`rgba(${p.c},${a})`; fxc.fill(); /* 主粒子 */
   }
-  fxc.globalAlpha=1; fxc.shadowBlur=0; requestAnimationFrame(fxLoop); /* 下一帧 */
+  requestAnimationFrame(fxLoop); /* 下一帧 */
 })();
 
 /* ---------- 背景星空 ---------- */
 (function buildSky(){
-  const cv=document.getElementById('starfield'),ctx=cv.getContext('2d'); let stars=[]; /* 星星列表 */
+  const cv=document.getElementById('starfield'),ctx=cv.getContext('2d',{alpha:true,desynchronized:true}); let stars=[]; /* 星星列表 */
+  let skyTick=0; /* 隔帧绘制计数，降低全屏 clear 频率 */
   function resize(){
     cv.width=innerWidth;cv.height=innerHeight; /* 铺满 */
-    stars=Array.from({length:Math.round(innerWidth*innerHeight/6500)},()=>({x:Math.random()*cv.width,y:Math.random()*cv.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*0.02+0.003,g:Math.random()>0.93})); /* 生成星星 */
+    stars=Array.from({length:Math.round(innerWidth*innerHeight/11000)},()=>({x:Math.random()*cv.width,y:Math.random()*cv.height,r:Math.random()*1.4+.2,a:Math.random(),s:Math.random()*0.02+0.003,g:Math.random()>0.93})); /* 减少星数以降低每帧路径开销 */
   }
   resize(); addEventListener('resize',resize); /* 自适应 */
   (function tw(){
-    ctx.clearRect(0,0,cv.width,cv.height); /* 清屏 */
-    for(const st of stars){
-      st.a+=st.s;const al=0.3+Math.abs(Math.sin(st.a))*0.7; /* 闪烁相位 */
-      ctx.beginPath();ctx.arc(st.x,st.y,st.r,0,7);
-      ctx.fillStyle=st.g?`rgba(233,200,118,${al})`:`rgba(220,228,255,${al})`;ctx.fill(); /* 金色或冷白星 */
+    skyTick++; /* 帧计数 */
+    for(const st of stars) st.a+=st.s; /* 每帧推进相位，保证闪烁节奏 */
+    if(skyTick%2===0){ /* 隔帧重绘星空，视觉几乎无感 */
+      ctx.clearRect(0,0,cv.width,cv.height); /* 清屏 */
+      for(const st of stars){
+        const al=0.3+Math.abs(Math.sin(st.a))*0.7; /* 闪烁相位 */
+        ctx.beginPath();ctx.arc(st.x,st.y,st.r,0,7);
+        ctx.fillStyle=st.g?`rgba(233,200,118,${al})`:`rgba(220,228,255,${al})`;ctx.fill(); /* 金色或冷白星 */
+      }
     }
     requestAnimationFrame(tw); /* 继续闪烁 */
   })();
@@ -721,7 +761,11 @@ function chime(){
 /* ---------- MediaPipe 手势：移动旋转 + 捏合抽牌 ---------- */
 const camBtn=document.getElementById('camBtn'), camWrap=document.getElementById('camWrap'),
       video=document.getElementById('cam'), overlay=document.getElementById('overlay'); /* 摄像头相关 DOM */
+const overlayCtx=overlay.getContext('2d',{alpha:true,desynchronized:true}); /* 缓存 2d 上下文，避免每帧 getContext */
 let landmarker=null, camOn=false, pinchArmed=true; /* 模型与捏合防抖开关 */
+let smoothOff=0; /* 掌心水平偏移的 EMA 平滑值 */
+let lastDetectT=0; /* 上次推理时间戳 */
+const DETECT_MS=50; /* 推理间隔约 20fps，给牌环/粒子留出主线程时间 */
 
 /* 点击开启/关闭手势识别 */
 camBtn.addEventListener('click', async ()=>{
@@ -734,11 +778,15 @@ camBtn.addEventListener('click', async ()=>{
     landmarker = await HandLandmarker.createFromOptions(fileset,{ /* 创建手部关键点模型 */
       baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate:'GPU'},
       runningMode:'VIDEO', numHands:1 });
-    const stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}}); /* 打开摄像头 */
+    const stream = await navigator.mediaDevices.getUserMedia({ /* 打开摄像头：低分辨率即可，显著减轻解码与推理 */
+      video:{width:{ideal:320}, height:{ideal:240}, frameRate:{ideal:24, max:30}} });
     video.srcObject=stream; await video.play(); /* 播放预览 */
     camOn=true; camWrap.classList.add('on'); camBtn.textContent='关闭手势'; /* UI 切换 */
-    overlay.width=172; overlay.height=129; setStatus('请将手放入画面 · 移动手掌旋转 · 捏合抽牌',true); /* 提示 */
-    detectLoop(); /* 开始检测循环 */
+    overlay.width=172; overlay.height=129; /* 叠加层尺寸固定 */
+    smoothOff=0; lastDetectT=0; lastTs=-1; /* 重置手势滤波与帧缓存 */
+    lastStatusTxt=''; /* 允许写入开场提示 */
+    setStatus('请将手放入画面 · 移动手掌旋转 · 捏合抽牌',true); /* 提示 */
+    detectLoop(performance.now()); /* 开始检测循环 */
   }catch(err){
     console.error(err); camBtn.textContent='开启手势';
     setStatus('摄像头/模型加载失败，可改用鼠标或键盘（请用本地服务器打开）',false); /* file:// 常会失败 */
@@ -749,31 +797,49 @@ camBtn.addEventListener('click', async ()=>{
 function stopCam(){
   camOn=false; camWrap.classList.remove('on'); camBtn.textContent='开启手势';
   if(video.srcObject){video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null;}
+  overlayCtx.clearRect(0,0,overlay.width,overlay.height); /* 清关键点叠加 */
+  smoothOff=0; /* 复位滤波 */
 }
 
 let lastTs=-1; /* 避免同帧重复推理 */
-function detectLoop(){
+function detectLoop(t){
   if(!camOn)return; /* 已关闭则停 */
-  if(video.currentTime!==lastTs && landmarker){ /* 新帧才推理 */
-    lastTs=video.currentTime;
-    handleHand(landmarker.detectForVideo(video, performance.now())); /* 检测手势 */
-  }
-  requestAnimationFrame(detectLoop); /* 持续循环 */
+  requestAnimationFrame(detectLoop); /* 先挂下一帧，避免推理阻塞导致循环中断 */
+  if(!landmarker) return; /* 模型未就绪 */
+  if(t-lastDetectT<DETECT_MS) return; /* 节流：不要每个显示帧都推理 */
+  if(video.readyState<2) return; /* 视频数据不足则跳过 */
+  if(video.currentTime===lastTs) return; /* 同视频帧不重复推理 */
+  lastTs=video.currentTime; /* 记录已处理的视频时间 */
+  lastDetectT=t; /* 记录推理时刻 */
+  handleHand(landmarker.detectForVideo(video, t)); /* 同步推理（已节流） */
 }
 
 /* 解析关键点：掌心偏移旋转，捏合抽牌 */
 function handleHand(res){
-  const o=overlay.getContext('2d'); o.clearRect(0,0,overlay.width,overlay.height); /* 清叠加层 */
-  if(!res.landmarks||!res.landmarks.length){ setStatus('未检测到手 · 请把手伸入画面',true); return; } /* 无手 */
+  overlayCtx.clearRect(0,0,overlay.width,overlay.height); /* 清叠加层 */
+  if(!res.landmarks||!res.landmarks.length){ /* 无手 */
+    smoothOff*=0.7; /* 丢手时衰减偏移，避免速度突然归零抽搐 */
+    setStatus('未检测到手 · 请把手伸入画面',true); /* 提示（去重后不会每帧写 DOM） */
+    return;
+  }
   const lm=res.landmarks[0]; /* 第一只手 */
-  o.fillStyle='rgba(233,200,118,.9)'; /* 金色关键点 */
-  for(const p of lm){ o.beginPath(); o.arc(p.x*overlay.width,p.y*overlay.height,2.2,0,7); o.fill(); } /* 画关键点 */
-  const off=lm[9].x-0.5; /* 中指根相对画面中心的水平偏移 */
-  if(Math.abs(off)>0.08){ vel+=off*1.4; idle=false; lastInteract=performance.now(); } /* 偏移足够则旋转牌环 */
+  overlayCtx.fillStyle='rgba(233,200,118,.9)'; /* 金色关键点 */
+  overlayCtx.beginPath(); /* 合并路径，一次 fill */
+  for(const p of lm){ /* 画全部关键点 */
+    overlayCtx.moveTo(p.x*overlay.width+2.2, p.y*overlay.height); /* 移到圆边，避免连线 */
+    overlayCtx.arc(p.x*overlay.width,p.y*overlay.height,2.2,0,7); /* 圆点 */
+  }
+  overlayCtx.fill(); /* 一次填充全部关键点 */
+  const rawOff=lm[9].x-0.5; /* 中指根相对画面中心的水平偏移 */
+  smoothOff+= (rawOff-smoothOff)*0.38; /* EMA 低通，抑制摄像头抖动 */
+  if(Math.abs(smoothOff)>0.06){ /* 死区：小抖动不驱动旋转 */
+    const push=Math.max(-0.85, Math.min(0.85, smoothOff*1.25)); /* 限幅单次增量，防止一帧猛冲 */
+    vel+=push; idle=false; lastInteract=performance.now(); /* 写入旋转速度 */
+  }
   const d=Math.hypot(lm[4].x-lm[8].x, lm[4].y-lm[8].y, (lm[4].z||0)-(lm[8].z||0)); /* 拇指-食指距离 */
   if(d<0.055 && pinchArmed){ pinchArmed=false; drawCard(activeIndex()); } /* 捏合触发抽牌 */
   if(d>0.10) pinchArmed=true; /* 松开后重新武装 */
-  if(camOn) setStatus(d<0.055?'✦ 捏合 · 抽取此牌':'移动手掌旋转 · 捏合抽牌',true); /* 实时状态 */
+  if(camOn) setStatus(d<0.055?'✦ 捏合 · 抽取此牌':'移动手掌旋转 · 捏合抽牌',true); /* 实时状态（同文案跳过） */
 }
 </script>
 </body>
