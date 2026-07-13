@@ -174,7 +174,8 @@
     border:1px solid rgba(233,200,118,.3); background:#05070f; display:none; box-shadow:0 8px 24px rgba(0,0,0,.5);
   }
   .cam-wrap.on{display:block;}
-  #cam{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); opacity:.85;}
+  #cam{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); opacity:.9;}
+  /* 叠加层与画面同向镜像，关键点才能对准真实手部 */
   #overlay{position:absolute; inset:0; width:100%; height:100%; transform:scaleX(-1);}
   .cam-tag{position:absolute; left:7px; top:6px; font-family:"Cinzel",serif; font-size:9px; letter-spacing:.18em; color:var(--gold-2); text-shadow:0 1px 3px #000;}
   .controls{display:flex; flex-wrap:wrap; gap:8px;}
@@ -187,6 +188,7 @@
     transition:transform .15s ease, box-shadow .2s ease;
   }
   .btn:hover{transform:translateY(-1px); box-shadow:0 6px 18px rgba(233,200,118,.4);}
+  .btn:disabled{opacity:.55; cursor:wait; transform:none;} /* 加载中不可点 */
   .btn.ghost{background:transparent; color:var(--gold-2); border:1px solid rgba(233,200,118,.45); box-shadow:none; font-weight:500;}
   /* 中央状态提示 */
   .status{
@@ -764,13 +766,24 @@ const camBtn=document.getElementById('camBtn'), camWrap=document.getElementById(
 const overlayCtx=overlay.getContext('2d',{alpha:true,desynchronized:true}); /* 缓存 2d 上下文，避免每帧 getContext */
 let landmarker=null, camOn=false, pinchArmed=true; /* 模型与捏合防抖开关 */
 let smoothOff=0; /* 掌心水平偏移的 EMA 平滑值 */
-let lastDetectT=0; /* 上次推理时间戳 */
-const DETECT_MS=50; /* 推理间隔约 20fps，给牌环/粒子留出主线程时间 */
+let lastDetectT=0; /* 上次推理的 performance 时间 */
+let mediaTs=0; /* MediaPipe VIDEO 模式要求严格递增的毫秒时间戳 */
+let missFrames=0; /* 连续未检测到手的帧数，用于稳定提示 */
+const DETECT_MS=33; /* 约 30fps 推理，兼顾灵敏度与流畅 */
 const MODEL_URL=new URL('assets/mediapipe/hand_landmarker.task', location.href).href; /* 自托管模型，避免 Google 存储在国内不可达 */
 const VISION_CDNS=[ /* MediaPipe 运行时 CDN 候选：国内镜像优先 */
   'https://cdn.jsdmirror.com/npm/@mediapipe/tasks-vision@0.10.18',
   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18',
   'https://unpkg.com/@mediapipe/tasks-vision@0.10.18'
+];
+/* 手部骨架连线（拇指/食指/中指/无名指/小指 + 掌心） */
+const HAND_CONNECTIONS=[
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17]
 ];
 
 /* 依次尝试多个 CDN，加载 FilesetResolver + HandLandmarker */
@@ -786,9 +799,14 @@ async function loadVisionRuntime(){
   throw lastErr||new Error('MediaPipe CDN 全部不可用'); /* 全部失败再抛出 */
 }
 
-/* 创建手部模型：优先 GPU，失败回退 CPU */
+/* 创建手部模型：降低置信阈值提高召回，GPU 失败回退 CPU */
 async function createHandLandmarker(HandLandmarker, fileset){
-  const common={runningMode:'VIDEO', numHands:1}; /* 视频模式、单手 */
+  const common={ /* 识别参数：略降阈值，更容易锁定手 */
+    runningMode:'VIDEO', numHands:2, /* 双手都检，取最大的一只操控 */
+    minHandDetectionConfidence:0.35, /* 初次检出更宽松 */
+    minHandPresenceConfidence:0.35, /* 画面中持续存在更宽松 */
+    minTrackingConfidence:0.35 /* 跟踪更稳，少丢帧 */
+  };
   try{
     return await HandLandmarker.createFromOptions(fileset,{ /* 先试 GPU 加速 */
       ...common, baseOptions:{modelAssetPath:MODEL_URL, delegate:'GPU'} });
@@ -799,18 +817,37 @@ async function createHandLandmarker(HandLandmarker, fileset){
   }
 }
 
-/* 打开摄像头：约束失败时降级为最简 video:true */
+/* 打开摄像头：识别需要足够分辨率，320 太容易丢手 */
 async function openCameraStream(){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ /* 环境不支持 */
     throw new Error('当前浏览器不支持摄像头（需 HTTPS 或 localhost）'); /* 明确提示 */
   }
   try{
-    return await navigator.mediaDevices.getUserMedia({ /* 优先低分辨率，减轻负载 */
-      video:{facingMode:'user', width:{ideal:320}, height:{ideal:240}} });
+    return await navigator.mediaDevices.getUserMedia({ /* 640×480 对 HandLandmarker 更稳 */
+      video:{facingMode:'user', width:{ideal:640}, height:{ideal:480}, frameRate:{ideal:30, max:30}},
+      audio:false });
   }catch(err){
     console.warn('指定约束失败，改用默认摄像头', err); /* 兼容旧设备 */
-    return await navigator.mediaDevices.getUserMedia({video:true}); /* 最简约束再试 */
+    return await navigator.mediaDevices.getUserMedia({video:true, audio:false}); /* 最简约束再试 */
   }
+}
+
+/* 把叠加画布对齐到真实视频像素，关键点更准 */
+function syncOverlayToVideo(){
+  const w=video.videoWidth||640, h=video.videoHeight||480; /* 真实帧尺寸 */
+  if(overlay.width!==w || overlay.height!==h){ /* 仅变化时重置，避免清空上下文状态 */
+    overlay.width=w; overlay.height=h; /* 按视频分辨率绘制 */
+  }
+}
+
+/* 等待视频真正有帧可读（Edge 上 play() 后偶发仍无尺寸） */
+function waitForVideoFrame(){
+  return new Promise((resolve)=>{
+    if(video.readyState>=2 && video.videoWidth>0){ resolve(); return; } /* 已就绪 */
+    const done=()=>{ video.removeEventListener('loadeddata', done); resolve(); }; /* 收到数据 */
+    video.addEventListener('loadeddata', done, {once:true}); /* 等一帧 */
+    setTimeout(done, 1200); /* 超时也继续，避免卡住 */
+  });
 }
 
 /* 点击开启/关闭手势识别 */
@@ -821,15 +858,16 @@ camBtn.addEventListener('click', async ()=>{
   try{
     const stream=await openCameraStream(); /* 先开摄像头，避免模型失败时完全无反馈 */
     video.srcObject=stream; await video.play(); /* 立即显示预览 */
+    await waitForVideoFrame(); /* 等到有真实帧再推理 */
     camWrap.classList.add('on'); /* 先显示摄像头窗 */
+    syncOverlayToVideo(); /* 对齐叠加层尺寸 */
     setStatus('摄像头已打开 · 正在加载手势模型…',true); /* 阶段提示 */
     const {HandLandmarker, fileset}=await loadVisionRuntime(); /* 再加载运行时 */
     landmarker=await createHandLandmarker(HandLandmarker, fileset); /* 创建检测器 */
     camOn=true; camBtn.textContent='关闭手势'; camBtn.disabled=false; /* UI 就绪 */
-    overlay.width=172; overlay.height=129; /* 叠加层尺寸固定 */
-    smoothOff=0; lastDetectT=0; lastTs=-1; /* 重置手势滤波与帧缓存 */
+    smoothOff=0; lastDetectT=0; mediaTs=0; lastTs=-1; missFrames=0; pinchArmed=true; /* 重置状态 */
     lastStatusTxt=''; /* 允许写入开场提示 */
-    setStatus('请将手放入画面 · 移动手掌旋转 · 捏合抽牌',true); /* 提示 */
+    setStatus('请将手掌正对镜头 · 左右移动旋转 · 捏合抽牌',true); /* 提示 */
     detectLoop(performance.now()); /* 开始检测循环 */
   }catch(err){
     console.error(err); /* 控制台保留详细错误 */
@@ -842,51 +880,102 @@ camBtn.addEventListener('click', async ()=>{
 
 /* 停止摄像头 */
 function stopCam(){
-  camOn=false; camWrap.classList.remove('on'); camBtn.textContent='开启手势';
+  camOn=false; camWrap.classList.remove('on'); camBtn.textContent='开启手势'; camBtn.disabled=false;
   if(video.srcObject){video.srcObject.getTracks().forEach(t=>t.stop()); video.srcObject=null;}
   overlayCtx.clearRect(0,0,overlay.width,overlay.height); /* 清关键点叠加 */
-  smoothOff=0; /* 复位滤波 */
+  smoothOff=0; missFrames=0; /* 复位滤波与丢帧计数 */
 }
 
-let lastTs=-1; /* 避免同帧重复推理 */
+let lastTs=-1; /* 兼容保留：不再用 currentTime 判重（Edge 直播流常不更新） */
 function detectLoop(t){
   if(!camOn)return; /* 已关闭则停 */
   requestAnimationFrame(detectLoop); /* 先挂下一帧，避免推理阻塞导致循环中断 */
   if(!landmarker) return; /* 模型未就绪 */
-  if(t-lastDetectT<DETECT_MS) return; /* 节流：不要每个显示帧都推理 */
-  if(video.readyState<2) return; /* 视频数据不足则跳过 */
-  if(video.currentTime===lastTs) return; /* 同视频帧不重复推理 */
-  lastTs=video.currentTime; /* 记录已处理的视频时间 */
+  if(video.readyState<2 || !video.videoWidth) return; /* 尚无有效帧 */
+  if(t-lastDetectT<DETECT_MS) return; /* 节流到约 30fps */
+  const dt=Math.max(1, Math.round(t-lastDetectT)); /* 距上次间隔（至少 1ms） */
   lastDetectT=t; /* 记录推理时刻 */
-  handleHand(landmarker.detectForVideo(video, t)); /* 同步推理（已节流） */
+  mediaTs+=dt; /* 严格递增时间戳，满足 detectForVideo 合同 */
+  syncOverlayToVideo(); /* 分辨率变化时重同步 */
+  try{
+    handleHand(landmarker.detectForVideo(video, mediaTs)); /* 推理并驱动交互 */
+  }catch(err){
+    console.warn('detectForVideo 异常', err); /* 单帧失败不中断循环 */
+  }
 }
 
-/* 解析关键点：掌心偏移旋转，捏合抽牌 */
+/* 从多只手中挑掌面最大的一只（更靠近镜头） */
+function pickPrimaryHand(landmarks){
+  let best=landmarks[0], bestArea=-1; /* 默认第一只 */
+  for(const lm of landmarks){ /* 遍历全部检出的手 */
+    let minX=1,minY=1,maxX=0,maxY=0; /* 包围盒 */
+    for(const p of lm){ /* 扫关键点 */
+      if(p.x<minX)minX=p.x; if(p.x>maxX)maxX=p.x; /* X 范围 */
+      if(p.y<minY)minY=p.y; if(p.y>maxY)maxY=p.y; /* Y 范围 */
+    }
+    const area=(maxX-minX)*(maxY-minY); /* 归一化面积 */
+    if(area>bestArea){ bestArea=area; best=lm; } /* 更大通常更近/更清晰 */
+  }
+  return best; /* 主操控手 */
+}
+
+/* 在叠加层画骨架 + 关键点，便于确认识别是否生效 */
+function drawHandOverlay(lm){
+  const w=overlay.width, h=overlay.height; /* 画布尺寸 */
+  overlayCtx.lineWidth=Math.max(2, w/160); /* 线宽随分辨率变化 */
+  overlayCtx.strokeStyle='rgba(233,200,118,.75)'; /* 金色骨架 */
+  overlayCtx.beginPath(); /* 一次描完所有连线 */
+  for(const [a,b] of HAND_CONNECTIONS){ /* 逐段连接 */
+    const p=lm[a], q=lm[b]; /* 两端关键点 */
+    overlayCtx.moveTo(p.x*w, p.y*h); overlayCtx.lineTo(q.x*w, q.y*h); /* 线段 */
+  }
+  overlayCtx.stroke(); /* 描边 */
+  overlayCtx.fillStyle='rgba(255,240,180,.95)'; /* 关节点 */
+  overlayCtx.beginPath(); /* 一次填充全部点 */
+  const r=Math.max(2.5, w/90); /* 点半径 */
+  for(const p of lm){ /* 21 个关键点 */
+    overlayCtx.moveTo(p.x*w+r, p.y*h); /* 移到圆边避免连线 */
+    overlayCtx.arc(p.x*w, p.y*h, r, 0, Math.PI*2); /* 圆点 */
+  }
+  overlayCtx.fill(); /* 填充 */
+  /* 拇指尖与食指尖高亮，提示捏合判定点 */
+  for(const i of [4,8]){ /* 4=拇指尖 8=食指尖 */
+    const p=lm[i]; /* 取点 */
+    overlayCtx.beginPath(); overlayCtx.arc(p.x*w, p.y*h, r*1.6, 0, Math.PI*2); /* 更大的圈 */
+    overlayCtx.strokeStyle='rgba(255,255,255,.9)'; overlayCtx.lineWidth=2; overlayCtx.stroke(); /* 白圈 */
+  }
+}
+
+/* 解析关键点：掌心偏移旋转，捏合抽牌（镜像画面下校正方向） */
 function handleHand(res){
   overlayCtx.clearRect(0,0,overlay.width,overlay.height); /* 清叠加层 */
-  if(!res.landmarks||!res.landmarks.length){ /* 无手 */
-    smoothOff*=0.7; /* 丢手时衰减偏移，避免速度突然归零抽搐 */
-    setStatus('未检测到手 · 请把手伸入画面',true); /* 提示（去重后不会每帧写 DOM） */
+  if(!res||!res.landmarks||!res.landmarks.length){ /* 无手 */
+    missFrames++; /* 累计丢检 */
+    smoothOff*=0.75; /* 丢手时衰减偏移，避免速度突然归零抽搐 */
+    if(missFrames>8) setStatus('未检测到手 · 请把手掌正对镜头、光线亮一点',true); /* 稳定后再提示 */
     return;
   }
-  const lm=res.landmarks[0]; /* 第一只手 */
-  overlayCtx.fillStyle='rgba(233,200,118,.9)'; /* 金色关键点 */
-  overlayCtx.beginPath(); /* 合并路径，一次 fill */
-  for(const p of lm){ /* 画全部关键点 */
-    overlayCtx.moveTo(p.x*overlay.width+2.2, p.y*overlay.height); /* 移到圆边，避免连线 */
-    overlayCtx.arc(p.x*overlay.width,p.y*overlay.height,2.2,0,7); /* 圆点 */
-  }
-  overlayCtx.fill(); /* 一次填充全部关键点 */
-  const rawOff=lm[9].x-0.5; /* 中指根相对画面中心的水平偏移 */
-  smoothOff+= (rawOff-smoothOff)*0.38; /* EMA 低通，抑制摄像头抖动 */
-  if(Math.abs(smoothOff)>0.06){ /* 死区：小抖动不驱动旋转 */
-    const push=Math.max(-0.85, Math.min(0.85, smoothOff*1.25)); /* 限幅单次增量，防止一帧猛冲 */
+  missFrames=0; /* 复位丢检 */
+  const lm=pickPrimaryHand(res.landmarks); /* 选主手 */
+  drawHandOverlay(lm); /* 画骨架反馈 */
+
+  /* 镜像预览下：用户朝屏幕右侧挥手 → 原始帧 x 变小，故取反使操控方向符合直觉 */
+  const rawOff=0.5-lm[9].x; /* 中指根相对中心（已镜像校正） */
+  smoothOff+=(rawOff-smoothOff)*0.45; /* EMA：更快跟随，仍抑抖 */
+  const dead=0.04; /* 死区略缩小，轻微移动也能驱动 */
+  if(Math.abs(smoothOff)>dead){ /* 超出死区才旋转 */
+    const push=Math.max(-1.15, Math.min(1.15, (smoothOff-Math.sign(smoothOff)*dead)*1.55)); /* 限幅并减去死区 */
     vel+=push; idle=false; lastInteract=performance.now(); /* 写入旋转速度 */
   }
-  const d=Math.hypot(lm[4].x-lm[8].x, lm[4].y-lm[8].y, (lm[4].z||0)-(lm[8].z||0)); /* 拇指-食指距离 */
-  if(d<0.055 && pinchArmed){ pinchArmed=false; drawCard(activeIndex()); } /* 捏合触发抽牌 */
-  if(d>0.10) pinchArmed=true; /* 松开后重新武装 */
-  if(camOn) setStatus(d<0.055?'✦ 捏合 · 抽取此牌':'移动手掌旋转 · 捏合抽牌',true); /* 实时状态（同文案跳过） */
+
+  /* 捏合用二维距离更稳（z 噪声大会导致很难触发） */
+  const d=Math.hypot(lm[4].x-lm[8].x, lm[4].y-lm[8].y); /* 拇指-食指像素归一化距离 */
+  if(d<0.065 && pinchArmed){ /* 捏合阈值略放宽 */
+    pinchArmed=false; /* 防抖：一次捏合只抽一张 */
+    drawCard(activeIndex()); /* 抽取正中牌 */
+  }
+  if(d>0.11) pinchArmed=true; /* 松开足够大才重新武装 */
+  if(camOn) setStatus(d<0.065?'✦ 捏合 · 抽取此牌':'已识别手势 · 左右移动旋转 · 捏合抽牌',true); /* 实时状态 */
 }
 </script>
 </body>
